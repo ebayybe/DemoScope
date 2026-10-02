@@ -51,7 +51,7 @@ Shortcuts work on review pages whenever focus is not inside an input, button, li
 
 ## Architecture & Functions Breakdown
 
-DemoScope is a single self-invoking function (`@run-at document-start`, `@noframes`). `init()` chooses between the invite page and the review page and wires up the modules below. The complete reference for all 128 functions — name, responsibility, parameters and return value — is in [docs/FUNCTIONS.md](docs/FUNCTIONS.md).
+DemoScope is a single self-invoking function (`@run-at document-start`, `@noframes`). `init()` chooses between the invite page and the review page and wires up the modules below. The complete reference for all 128 functions — name, responsibility, parameters and return value — is in [docs/FUNCTIONS.md](https://github.com/ebayybe/DemoScope/blob/main/docs/en_FUNCTIONS.md).
 
 | Module | Responsibility | Key functions |
 |---|---|---|
