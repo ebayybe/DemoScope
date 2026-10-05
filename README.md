@@ -2,6 +2,17 @@
 
 **English** · [Български](README/bg_README.md) · [Magyar](README/hu_README.md) · [Tiếng Việt](README/vi_README.md) · [Ελληνικά](README/el_README.md) · [Dansk](README/da_README.md) · [Bahasa Indonesia](README/id_README.md) · [Español (España)](README/es-ES_README.md) · [Español (Latinoamérica)](README/es-419_README.md) · [Italiano](README/it_README.md) · [繁體中文](README/zh-TW_README.md) · [简体中文](README/zh-CN_README.md) · [한국어](README/ko_README.md) · [Deutsch](README/de_README.md) · [Nederlands](README/nl_README.md) · [Norsk](README/no_README.md) · [Polski](README/pl_README.md) · [Português (Portugal)](README/pt-PT_README.md) · [Português (Brasil)](README/pt-BR_README.md) · [Română](README/ro_README.md) · [Русский](README/ru_README.md) · [ไทย](README/th_README.md) · [Türkçe](README/tr_README.md) · [Українська](README/uk_README.md) · [Suomi](README/fi_README.md) · [Français](README/fr_README.md) · [Čeština](README/cs_README.md) · [Svenska](README/sv_README.md) · [日本語](README/ja_README.md)
 
+## Screenshots
+
+### 1. Welcome Screen
+![DemoScope Welcome](https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Welcome.png)
+
+### 2. Main Interface
+![DemoScope Main](https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope.png)
+
+### 3. Invite a Friend
+![DemoScope Invite](https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Invite_a_friend.png)
+
 # DemoScope — CS2 Review Toolkit
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Userscript](https://img.shields.io/badge/Tampermonkey%20%7C%20Violentmonkey-userscript-orange)
