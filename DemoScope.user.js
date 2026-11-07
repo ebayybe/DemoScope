@@ -28,11 +28,12 @@
 // @name:tr      DemoScope — CS2 inceleme araçları
 // @name:uk      DemoScope — інструменти перевірки CS2
 // @name:vi      DemoScope — công cụ kiểm duyệt CS2
+// @namespace    https://github.com/ebayybe/DemoScope
 // @homepageURL  https://github.com/ebayybe/DemoScope
 // @supportURL   https://github.com/ebayybe/DemoScope/issues
 // @updateURL    https://raw.githubusercontent.com/ebayybe/DemoScope/main/DemoScope.user.js
 // @downloadURL  https://raw.githubusercontent.com/ebayybe/DemoScope/main/DemoScope.user.js
-// @version      1.0.0
+// @version      1.2.0
 // @description  DemoScope: 29-language CS2 VACNet review toolkit with verdict presets, invite page enhancements, sound settings and local history
 // @description:bg Инструменти за преглед на CS2 VACNet на 29 езика: бързи присъди, клавишни комбинации, локална история, звукови настройки и подобрена страница за покани.
 // @description:zh-CN 支持 29 种语言的 CS2 VACNet 审查工具：判定预设、快捷键、本地历史记录、音效设置及邀请页面增强。
@@ -64,15 +65,25 @@
 // @description:vi Công cụ kiểm duyệt CS2 VACNet hỗ trợ 29 ngôn ngữ: phán quyết mẫu, phím tắt, lịch sử cục bộ, cài đặt âm thanh và trang mời được cải tiến.
 // @icon         https://i.postimg.cc/Pq08jWtz/0260927-185626227.png
 // @author       ebayybe
-// @license      MIT
+// @license      GPL-3.0-only
 // @match        https://www.counter-strike.net/vacnet
 // @match        https://www.counter-strike.net/vacnet/*
 // @exclude      https://www.counter-strike.net/vacnet/join*
 // @grant        GM_addStyle
 // @grant        unsafeWindow
+// @grant        GM_info
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
+
+/*
+ * Credits:
+ * Initial idea and base interface: skinsales / goodvibes, “CS2 VACNet Review — Player & Layout Enhancements” (MIT)
+ * https://greasyfork.org/ru/scripts/591778-cs2-vacnet-review-player-layout-enhancements
+ * Russian-language fork and related concept: authorless, “VACLens RU — CS2 Review Assistant” (MIT)
+ * https://greasyfork.org/ru/scripts/592414-vaclens-ru-cs2-review-assistant
+ * Architecture rewrite, reusable framework, 29-language support and custom presets: ebayybe.
+ */
 
 (function () {
   "use strict";
@@ -178,6 +189,53 @@
     location.replace(url.href);
     return true;
   }
+  // Valve renders the verdict questions/buttons in the language it picks from
+  // the ?l= parameter (or the browser language when there is none). The page's
+  // own stylesheet/script URLs carry that choice, so read it from there.
+  function getRenderedSteamLanguage() {
+    const nodes = document.querySelectorAll("link[href], script[src]");
+    for (const node of nodes) {
+      const raw = node.getAttribute("href") || node.getAttribute("src") || "";
+      const match = raw.match(/[?&]l=([a-z]+)/i);
+      if (match) return match[1].toLowerCase();
+    }
+    return null;
+  }
+
+  // When the user picked a language in DemoScope, make Valve's own text follow
+  // it - also on pages reached without ?l= (e.g. the next clip after Continue).
+  function syncSelectedLanguage() {
+    if (!/^\/vacnet(?:\/|$)/.test(location.pathname)) return false;
+    let saved = null;
+    try {
+      if (localStorage.getItem(LANGUAGE_AUTO_STORAGE_KEY) === "true") return false;
+      saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    } catch { return false; }
+    if (!saved || !Object.values(SUPPORTED_LOCALES).includes(saved)) return false;
+
+    const target = Object.keys(SUPPORTED_LOCALES).find((key) => SUPPORTED_LOCALES[key] === saved);
+    const rendered = getRenderedSteamLanguage();
+    if (!target || !rendered) return false;
+
+    const guardKey = "demoscopeLangSyncTried";
+    if (rendered === target) {
+      try { sessionStorage.removeItem(guardKey); } catch { /* ignore */ }
+      return false;
+    }
+    // Valve may not offer this language: try once per page instead of looping.
+    const attempt = `${target}|${location.pathname}`;
+    try {
+      if (sessionStorage.getItem(guardKey) === attempt) return false;
+      sessionStorage.setItem(guardKey, attempt);
+    } catch { return false; }
+
+    recordEvent("language redirect", `page rendered in "${rendered}", wanted "${target}"`);
+    const url = new URL(location.href);
+    url.searchParams.set("l", target);
+    location.replace(url.href);
+    return true;
+  }
+
   function getLanguageBadge() {
     const locale = getActiveLocale();
     const labels = {
@@ -295,6 +353,15 @@
     footerFeedback: ["Изпрати отзив", "发送反馈", "傳送意見", "Odeslat zpětnou vazbu", "Send feedback", "Feedback versturen", "Send Feedback", "Lähetä palautetta", "Envoyer un commentaire", "Feedback senden", "Αποστολή σχολίων", "Visszajelzés küldése", "Kirim masukan", "Invia feedback", "フィードバックを送信", "의견 보내기", "Send tilbakemelding", "Wyślij opinię", "Enviar feedback", "Enviar feedback", "Trimite feedback", "Отправить отзыв", "Enviar comentarios", "Enviar comentarios", "Skicka feedback", "ส่งความคิดเห็น", "Geri bildirim gönder", "Надіслати відгук", "Gửi phản hồi"],
     footerReport: ["Съобщи за проблем с клипа", "举报片段问题", "回報片段問題", "Nahlásit problém s klipem", "Rapportér et problem med klippet", "Probleem met clip melden", "Report Bad Clip", "Ilmoita ongelmallisesta klipistä", "Signaler un problème avec le clip", "Problem mit Clip melden", "Αναφορά προβλήματος αποσπάσματος", "Probléma jelentése a klippel kapcsolatban", "Laporkan masalah klip", "Segnala un problema con la clip", "クリップの問題を報告", "클립 문제 신고", "Rapporter et problem med klippet", "Zgłoś problem z klipem", "Denunciar problema no clipe", "Denunciar problema no clipe", "Raportează o problemă cu clipul", "Сообщить о проблеме с роликом", "Informar de un problema con el clip", "Informar de un problema con el clip", "Rapportera problem med klippet", "รายงานปัญหาของคลิป", "Klip sorununu bildir", "Повідомити про проблему з кліпом", "Báo cáo vấn đề về clip"],
     queueTimeFormat: ["Формат времени", "时间格式", "時間格式", "Formát času", "Tidsformat", "Tijdnotatie", "Time format", "Ajan muoto", "Format de l’heure", "Zeitformat", "Μορφή ώρας", "Időformátum", "Format waktu", "Formato orario", "時刻形式", "시간 형식", "Tidsformat", "Format czasu", "Formato da hora", "Formato da hora", "Formatul orei", "Формат времени", "Formato de hora", "Formato de hora", "Tidsformat", "รูปแบบเวลา", "Saat biçimi", "Формат часу", "Định dạng giờ"],
+    helpAim: ["Използва ли субектът чийтове, които откриват огън веднага щом противник попадне в прицела или мигновено насочват мерника към противниците?", "该对象是否使用了在敌人进入准星时自动开火、或瞬间锁定对手的作弊功能？", "該對象是否使用了在敵人進入準星時自動開火、或瞬間鎖定對手的作弊功能？", "Používá subjekt cheaty, které střílejí, jakmile se nepřítel ocitne v zaměřovači, nebo okamžitě zaměřují protivníky?", "Bruger spilleren snydeprogrammer, der skyder, så snart en fjende kommer ind i sigtekornet, eller som øjeblikkeligt låser sig fast på modstandere?", "Gebruikt de speler cheats die schieten zodra een vijand in het vizier komt, of die direct op tegenstanders richten?", "Is the subject using cheats that fire as soon as an enemy enters the crosshair, or snap onto opponents instantly?", "Käyttääkö kohde huijauksia, jotka laukaisevat aseen heti kun vihollinen osuu tähtäimeen tai tähtäävät vastustajiin välittömästi?", "Le sujet utilise-t-il des cheats qui tirent dès qu’un ennemi entre dans le viseur ou qui verrouillent instantanément la visée sur les adversaires ?", "Verwendet die Person Cheats, die feuern, sobald ein Gegner im Fadenkreuz erscheint, oder die sich sofort auf Gegner ausrichten?", "Χρησιμοποιεί το υποκείμενο cheats που πυροβολούν μόλις ένας εχθρός μπει στο στόχαστρο ή που στοχεύουν ακαριαία τους αντιπάλους;", "Használ-e a vizsgált játékos olyan csalást, amely tüzel, amint egy ellenfél a célkeresztbe kerül, vagy azonnal ráfordul az ellenfelekre?", "Apakah subjek menggunakan cheat yang menembak begitu musuh masuk ke crosshair, atau langsung membidik lawan secara instan?", "Il soggetto usa cheat che sparano non appena un nemico entra nel mirino o che si agganciano istantaneamente agli avversari?", "対象は、敵が照準に入った瞬間に発砲したり、敵に瞬時にエイムを合わせたりするチートを使っていますか？", "대상이 적이 조준선에 들어오는 즉시 발사하거나 적에게 즉시 조준을 고정하는 치트를 사용하고 있습니까?", "Bruker spilleren juksekoder som skyter så snart en fiende kommer i siktet, eller som umiddelbart låser seg på motstandere?", "Czy badany gracz używa cheatów, które strzelają, gdy tylko wróg znajdzie się w celowniku, albo natychmiast naprowadzają celownik na przeciwników?", "O sujeito usa cheats que disparam assim que um inimigo entra na mira ou que apontam instantaneamente aos adversários?", "O jogador usa cheats que disparam assim que um inimigo entra na mira ou que miram instantaneamente nos adversários?", "Folosește subiectul cheaturi care trag imediat ce un inamic intră în țintă sau care țintesc instantaneu adversarii?", "Использует ли субъект читы, позволяющие открывать огонь, как только враг попадёт в прицел, или мгновенно наводиться на противников?", "¿El sujeto usa trampas que disparan en cuanto un enemigo entra en la mira o que apuntan instantáneamente a los rivales?", "¿El sujeto usa trampas que disparan apenas un enemigo entra en la mira o que apuntan al instante a los rivales?", "Använder spelaren fusk som skjuter så snart en fiende kommer i siktet, eller som omedelbart låser sig på motståndare?", "ผู้เล่นที่ถูกตรวจสอบใช้โปรแกรมโกงที่ยิงทันทีเมื่อศัตรูเข้ามาอยู่ในศูนย์เล็ง หรือล็อกเป้าไปที่ศัตรูทันทีหรือไม่", "Oyuncu, düşman nişangâha girer girmez ateş eden veya rakiplere anında kilitlenen hileler kullanıyor mu?", "Чи використовує суб’єкт чити, що відкривають вогонь, щойно ворог потрапляє в приціл, або миттєво наводяться на супротивників?", "Đối tượng có dùng phần mềm gian lận tự động bắn ngay khi kẻ địch vào tâm ngắm hoặc ghim tâm vào đối thủ tức thì không?"],
+    helpWalls: ["Използва ли субектът чийтове, които позволяват да вижда враговете през стени, подове, дим и други препятствия или докато е заслепен?", "该对象是否使用了能透过墙壁、地板、烟雾等障碍物看到敌人（或在被致盲时仍能看到敌人）的作弊功能？", "該對象是否使用了能透過牆壁、地板、煙霧等障礙物看到敵人（或在被致盲時仍能看到敵人）的作弊功能？", "Používá subjekt cheaty, které umožňují vidět nepřátele skrz zdi, podlahy, kouř a jiné překážky nebo i při oslepení?", "Bruger spilleren snydeprogrammer, der gør det muligt at se fjender gennem vægge, gulve, røg og andre forhindringer eller mens vedkommende er blændet?", "Gebruikt de speler cheats waarmee vijanden door muren, vloeren, rook en andere obstakels heen te zien zijn, of terwijl de speler verblind is?", "Is the subject using cheats that show enemies through walls, floors, smoke and other obstacles, or while blinded?", "Käyttääkö kohde huijauksia, joiden avulla vihollisia näkee seinien, lattioiden, savun ja muiden esteiden läpi tai sokaistuneena?", "Le sujet utilise-t-il des cheats permettant de voir les ennemis à travers les murs, les sols, la fumée et d’autres obstacles, ou en étant aveuglé ?", "Verwendet die Person Cheats, mit denen sich Gegner durch Wände, Böden, Rauch und andere Hindernisse oder im geblendeten Zustand sehen lassen?", "Χρησιμοποιεί το υποκείμενο cheats που επιτρέπουν να βλέπει τους εχθρούς μέσα από τοίχους, δάπεδα, καπνό και άλλα εμπόδια ή ενώ είναι τυφλωμένο;", "Használ-e a vizsgált játékos olyan csalást, amellyel falakon, padlókon, füstön és más akadályokon át vagy elvakítva is látja az ellenfeleket?", "Apakah subjek menggunakan cheat yang memungkinkan melihat musuh menembus dinding, lantai, asap, dan rintangan lain, atau saat sedang dibutakan?", "Il soggetto usa cheat che permettono di vedere i nemici attraverso muri, pavimenti, fumo e altri ostacoli, o mentre è accecato?", "対象は、壁・床・スモークなどの障害物越しや、視界を奪われた状態で敵を見られるチートを使っていますか？", "대상이 벽, 바닥, 연막 등 장애물 너머의 적이나 실명 상태에서도 적을 볼 수 있게 해 주는 치트를 사용하고 있습니까?", "Bruker spilleren juksekoder som gjør det mulig å se fiender gjennom vegger, gulv, røyk og andre hindringer, eller mens spilleren er blendet?", "Czy badany gracz używa cheatów pozwalających widzieć przeciwników przez ściany, podłogi, dym i inne przeszkody lub będąc oślepionym?", "O sujeito usa cheats que permitem ver inimigos através de paredes, pisos, fumo e outros obstáculos, ou enquanto está cego?", "O jogador usa cheats que permitem ver inimigos através de paredes, pisos, fumaça e outros obstáculos, ou enquanto está cego?", "Folosește subiectul cheaturi care permit să vadă inamicii prin pereți, podele, fum și alte obstacole sau în timp ce este orbit?", "Использует ли субъект читы, позволяющие видеть врагов сквозь стены, полы, дымы и другие препятствия или будучи ослеплённым?", "¿El sujeto usa trampas que permiten ver a los enemigos a través de paredes, suelos, humo y otros obstáculos, o estando cegado?", "¿El sujeto usa trampas que permiten ver a los enemigos a través de paredes, pisos, humo y otros obstáculos, o estando cegado?", "Använder spelaren fusk som gör det möjligt att se fiender genom väggar, golv, rök och andra hinder, eller när spelaren är bländad?", "ผู้เล่นที่ถูกตรวจสอบใช้โปรแกรมโกงที่ทำให้มองเห็นศัตรูทะลุกำแพง พื้น ควัน และสิ่งกีดขวางอื่น ๆ หรือขณะถูกแสงแฟลชทำให้ตาพร่าหรือไม่", "Oyuncu, düşmanları duvarların, zeminlerin, dumanın ve diğer engellerin ardından ya da kör olmuşken görmeyi sağlayan hileler kullanıyor mu?", "Чи використовує суб’єкт чити, що дають змогу бачити ворогів крізь стіни, підлогу, дим та інші перешкоди або будучи осліпленим?", "Đối tượng có dùng phần mềm gian lận cho phép nhìn thấy kẻ địch xuyên tường, sàn, khói và các vật cản khác, hoặc khi đang bị làm mù không?"],
+    helpBhop: ["Използва ли субектът помощни инструменти, които скачат точно в момента на приземяване, за да увеличат скоростта му?", "该对象是否使用了在落地的瞬间精准起跳以提升速度的辅助工具？", "該對象是否使用了在落地的瞬間精準起跳以提升速度的輔助工具？", "Používá subjekt pomocné nástroje, které skáčou přesně v okamžiku dopadu, aby zvýšily jeho rychlost?", "Bruger spilleren hjælpeværktøjer, der hopper præcis i det øjeblik, man lander, for at øge farten?", "Gebruikt de speler hulpmiddelen die precies op het moment van landen springen om snelheid te winnen?", "Is the subject using helper tools that jump at the exact moment of landing to gain speed?", "Käyttääkö kohde apuvälineitä, jotka hyppäävät täsmälleen laskeutumishetkellä nopeuden kasvattamiseksi?", "Le sujet utilise-t-il des outils d’assistance qui sautent précisément au moment de l’atterrissage pour gagner en vitesse ?", "Verwendet die Person Hilfsmittel, die genau im Moment der Landung springen, um schneller zu werden?", "Χρησιμοποιεί το υποκείμενο βοηθητικά εργαλεία που πηδούν ακριβώς τη στιγμή της προσγείωσης για να αυξήσει την ταχύτητά του;", "Használ-e a vizsgált játékos olyan segédeszközt, amely pontosan a földetérés pillanatában ugrik, hogy növelje a sebességét?", "Apakah subjek menggunakan alat bantu yang melompat tepat saat mendarat untuk menambah kecepatan?", "Il soggetto usa strumenti di supporto che saltano esattamente al momento dell’atterraggio per aumentare la velocità?", "対象は、着地の瞬間に正確にジャンプして速度を稼ぐ補助ツールを使っていますか？", "대상이 착지하는 정확한 순간에 점프하여 속도를 높이는 보조 도구를 사용하고 있습니까?", "Bruker spilleren hjelpeverktøy som hopper nøyaktig i landingsøyeblikket for å øke farten?", "Czy badany gracz używa narzędzi pomocniczych, które skaczą dokładnie w momencie lądowania, aby zwiększyć prędkość?", "O sujeito usa ferramentas de apoio que saltam exatamente no momento da aterragem para ganhar velocidade?", "O jogador usa ferramentas de auxílio que pulam exatamente no momento do pouso para ganhar velocidade?", "Folosește subiectul instrumente de ajutor care sar exact în momentul aterizării pentru a câștiga viteză?", "Использует ли субъект вспомогательные инструменты, позволяющие подпрыгивать точно в момент приземления, чтобы увеличивать свою скорость?", "¿El sujeto usa herramientas de ayuda que saltan justo en el momento de aterrizar para ganar velocidad?", "¿El sujeto usa herramientas de ayuda que saltan justo en el momento de aterrizar para ganar velocidad?", "Använder spelaren hjälpmedel som hoppar exakt i landningsögonblicket för att öka farten?", "ผู้เล่นที่ถูกตรวจสอบใช้เครื่องมือช่วยที่กระโดดในจังหวะที่ลงสู่พื้นพอดีเพื่อเพิ่มความเร็วหรือไม่", "Oyuncu, hızını artırmak için tam iniş anında zıplayan yardımcı araçlar kullanıyor mu?", "Чи використовує суб’єкт допоміжні інструменти, що підстрибують точно в момент приземлення, щоб збільшити швидкість?", "Đối tượng có dùng công cụ hỗ trợ nhảy đúng khoảnh khắc tiếp đất để tăng tốc độ không?"],
+    helpBot: ["Изглежда ли субектът напълно автоматизиран?", "该对象看起来是否完全由程序自动操控？", "該對象看起來是否完全由程式自動操控？", "Působí subjekt jako plně automatizovaný?", "Ser spilleren ud til at være fuldt automatiseret?", "Ziet de speler eruit als volledig geautomatiseerd?", "Does the subject look fully automated?", "Näyttääkö kohde täysin automatisoidulta?", "Le sujet semble-t-il entièrement automatisé ?", "Wirkt die Person vollständig automatisiert?", "Φαίνεται το υποκείμενο εντελώς αυτοματοποιημένο;", "Teljesen automatizáltnak tűnik a vizsgált játékos?", "Apakah subjek terlihat sepenuhnya otomatis?", "Il soggetto sembra completamente automatizzato?", "対象は完全に自動化されているように見えますか？", "대상이 완전히 자동화된 것처럼 보입니까?", "Ser spilleren ut til å være fullstendig automatisert?", "Czy badany gracz wygląda na w pełni zautomatyzowanego?", "O sujeito parece totalmente automatizado?", "O jogador parece totalmente automatizado?", "Pare subiectul complet automatizat?", "Выглядит ли субъект полностью автоматизированным?", "¿El sujeto parece totalmente automatizado?", "¿El sujeto parece totalmente automatizado?", "Ser spelaren ut att vara helt automatiserad?", "ผู้เล่นที่ถูกตรวจสอบดูเหมือนทำงานอัตโนมัติทั้งหมดหรือไม่", "Oyuncu tamamen otomatikleştirilmiş gibi görünüyor mu?", "Чи виглядає суб’єкт повністю автоматизованим?", "Đối tượng trông có hoàn toàn tự động không?"],
+    titleCheating: ["Чийтове?", "作弊？", "作弊？", "Cheaty?", "Snyd?", "Cheats?", "Cheating?", "Huijaus?", "Triche ?", "Cheaten?", "Cheats;", "Csalás?", "Curang?", "Cheat?", "チート？", "치트?", "Juks?", "Cheaty?", "Batota?", "Cheats?", "Cheaturi?", "Читы?", "¿Trampas?", "¿Trampas?", "Fusk?", "โกงหรือไม่?", "Hile?", "Чити?", "Gian lận?"],
+    cheatYes: ["Използва чийтове", "使用作弊", "使用作弊", "Používá cheaty", "Snyder", "Gebruikt cheats", "Cheating", "Huijaa", "Triche", "Cheatet", "Χρησιμοποιεί cheats", "Csal", "Curang", "Usa cheat", "チート使用", "치트 사용", "Jukser", "Używa cheatów", "Faz batota", "Usa cheats", "Folosește cheaturi", "Читы используются", "Usa trampas", "Usa trampas", "Fuskar", "ใช้โปรแกรมโกง", "Hile kullanıyor", "Чити використовуються", "Có gian lận"],
+    cheatNo: ["Без чийтове", "未发现作弊", "未發現作弊", "Cheaty nezjištěny", "Ingen snyd set", "Geen cheats gezien", "No cheats seen", "Ei huijausta", "Aucune triche vue", "Keine Cheats erkannt", "Δεν εντοπίστηκαν cheats", "Nincs csalás", "Tidak ada cheat", "Nessun cheat visto", "チートなし", "치트 없음", "Ingen juks sett", "Brak cheatów", "Sem batota", "Sem cheats", "Fără cheaturi", "Читы не замечены", "Sin trampas", "Sin trampas", "Inget fusk sett", "ไม่พบการโกง", "Hile görülmedi", "Чити не помічено", "Không thấy gian lận"],
+    cheatLocked: ["Другите два вердикта се отключват в края на клипа · остават {t}", "其余两个结论将在视频结束后解锁 · 剩余 {t}", "其餘兩個結論將在影片結束後解鎖 · 剩餘 {t}", "Další dva verdikty se odemknou po konci klipu · zbývá {t}", "De to øvrige vurderinger låses op, når klippet slutter · {t} tilbage", "De andere twee oordelen worden ontgrendeld als de clip eindigt · nog {t}", "The other two verdicts unlock when the clip ends · {t} left", "Kaksi muuta arviota avautuu klipin päätyttyä · jäljellä {t}", "Les deux autres verdicts se débloquent à la fin du clip · {t} restantes", "Die anderen beiden Urteile werden am Ende des Clips freigeschaltet · noch {t}", "Οι άλλες δύο κρίσεις ξεκλειδώνουν όταν τελειώσει το κλιπ · απομένουν {t}", "A másik két ítélet a klip végén nyílik meg · hátra van még {t}", "Dua vonis lainnya terbuka saat klip berakhir · sisa {t}", "Gli altri due verdetti si sbloccano al termine della clip · mancano {t}", "残り2つの判定はクリップ終了後に選べます · 残り {t}", "나머지 두 판정은 영상이 끝나면 선택할 수 있습니다 · {t} 남음", "De to andre vurderingene låses opp når klippet slutter · {t} igjen", "Pozostałe dwa werdykty odblokują się po zakończeniu klipu · zostało {t}", "Os outros dois veredictos desbloqueiam no fim do clipe · faltam {t}", "Os outros dois veredictos são liberados no fim do clipe · faltam {t}", "Celelalte două verdicte se deblochează la finalul clipului · mai sunt {t}", "Остальные два вердикта откроются после конца ролика · осталось {t}", "Los otros dos veredictos se desbloquean al terminar el clip · quedan {t}", "Los otros dos veredictos se desbloquean al terminar el clip · quedan {t}", "De två andra bedömningarna låses upp när klippet tar slut · {t} kvar", "คำตัดสินอีกสองแบบจะปลดล็อกเมื่อคลิปจบ · เหลือ {t}", "Diğer iki karar klip bitince açılır · {t} kaldı", "Решта двох вердиктів відкриються після кінця ролика · залишилось {t}", "Hai kết luận còn lại sẽ mở khi clip kết thúc · còn {t}"],
+    helpCheating: ["Използва ли субектът чийтове извън всякакво основателно съмнение? Изберете първия вердикт веднага щом сте сигурни — моментът се записва.", "该对象是否毫无合理怀疑地在作弊？一旦确定，请立即选择第一个结论——该时刻会被记录。", "該對象是否毫無合理懷疑地在作弊？一旦確定，請立即選擇第一個結論——該時刻會被記錄。", "Podvádí subjekt bez rozumných pochyb? Jakmile si budete jistí, zvolte první verdikt – okamžik se zaznamená.", "Snyder spilleren hinsides enhver rimelig tvivl? Vælg den første vurdering, så snart du er sikker – øjeblikket registreres.", "Speelt de speler vals zonder redelijke twijfel? Kies het eerste oordeel zodra je zeker bent – dat moment wordt vastgelegd.", "Is the subject cheating beyond a reasonable doubt? Choose the first verdict as soon as you’re sure — that moment is recorded.", "Huijaako kohde kohtuullisen epäilyn ulkopuolella? Valitse ensimmäinen arvio heti, kun olet varma – hetki tallentuu.", "Le sujet triche-t-il au-delà de tout doute raisonnable ? Choisissez le premier verdict dès que vous en êtes sûr – ce moment est enregistré.", "Cheatet die Person zweifelsfrei? Wählen Sie das erste Urteil, sobald Sie sicher sind – dieser Zeitpunkt wird festgehalten.", "Κάνει το υποκείμενο cheating πέρα από κάθε εύλογη αμφιβολία; Επιλέξτε την πρώτη κρίση μόλις είστε σίγουροι – η στιγμή καταγράφεται.", "Csal-e a vizsgált játékos minden észszerű kétséget kizáróan? Válassza az első ítéletet, amint biztos benne – a pillanat rögzítésre kerül.", "Apakah subjek curang tanpa keraguan yang wajar? Pilih vonis pertama begitu Anda yakin — momen itu dicatat.", "Il soggetto bara oltre ogni ragionevole dubbio? Scegli il primo verdetto appena ne sei sicuro: quel momento viene registrato.", "対象は合理的な疑いの余地なくチートを使っていますか？確信した時点で最初の判定を選んでください。その瞬間が記録されます。", "대상이 합리적 의심의 여지 없이 치트를 쓰고 있습니까? 확신이 드는 즉시 첫 번째 판정을 선택하세요. 그 순간이 기록됩니다.", "Jukser spilleren hinsides rimelig tvil? Velg den første vurderingen så snart du er sikker – øyeblikket registreres.", "Czy badany gracz oszukuje ponad wszelką wątpliwość? Wybierz pierwszy werdykt, gdy tylko będziesz pewien – ten moment zostanie zapisany.", "O sujeito faz batota para além de qualquer dúvida razoável? Escolha o primeiro veredicto assim que tiver a certeza – esse momento fica registado.", "O jogador usa cheats além de qualquer dúvida razoável? Escolha o primeiro veredicto assim que tiver certeza – esse momento é registrado.", "Trișează subiectul dincolo de orice îndoială rezonabilă? Alegeți primul verdict imediat ce sunteți sigur – momentul este înregistrat.", "Использует ли субъект читы вне всякого сомнения? Выберите первый вердикт, как только будете уверены — этот момент фиксируется.", "¿El sujeto hace trampas más allá de toda duda razonable? Elige el primer veredicto en cuanto estés seguro: ese momento queda registrado.", "¿El sujeto hace trampa más allá de toda duda razonable? Elige el primer veredicto apenas estés seguro: ese momento queda registrado.", "Fuskar spelaren bortom rimligt tvivel? Välj den första bedömningen så snart du är säker – ögonblicket registreras.", "ผู้เล่นที่ถูกตรวจสอบโกงโดยปราศจากข้อสงสัยอันสมควรหรือไม่ เลือกคำตัดสินแรกทันทีที่มั่นใจ — ช่วงเวลานั้นจะถูกบันทึก", "Oyuncu makul şüphenin ötesinde hile yapıyor mu? Emin olur olmaz ilk kararı seçin; o an kaydedilir.", "Чи використовує суб’єкт чити поза розумним сумнівом? Оберіть перший вердикт, щойно будете впевнені — цей момент фіксується.", "Đối tượng có gian lận ngoài mọi nghi ngờ hợp lý không? Hãy chọn kết luận đầu tiên ngay khi bạn chắc chắn — thời điểm đó sẽ được ghi lại."],
   };
 
   const INVITE_TEXT_ROWS = {
@@ -455,6 +522,7 @@
   function readSettingsHotkey() {
     try {
       const stored = localStorage.getItem(SETTINGS_HOTKEY_STORAGE_KEY);
+      if (stored === "none") return "";
       return stored && /^[A-Z][A-Za-z0-9]+$/.test(stored) ? stored : "F2";
     } catch { return "F2"; }
   }
@@ -485,13 +553,7 @@
   }
 
   function isReservedSettingsHotkey(code) {
-    return new Set([
-      "Enter", "NumpadEnter", "Space", "Escape", "Tab",
-      "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight",
-      "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Comma", "Period",
-      "KeyM", "KeyF", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5",
-      "F5", "F6", "F7", "F11", "F12",
-    ]).has(code);
+    return Boolean(validateKeyForAction("settings", normalizeKeyCode(code)));
   }
 
   function exportLocalHistory() {
@@ -720,6 +782,8 @@
       '@media(max-width:520px){.demoscope-settings-shell{padding:16px}.demoscope-settings-section{padding:13px}.demoscope-settings-actions{flex-direction:column}.demoscope-settings-actions button{width:100%}.demoscope-settings-range{flex-wrap:wrap}.demoscope-settings-range input[type="range"]{min-width:calc(100% - 70px);order:3;flex-basis:100%}.demoscope-settings-limit-controls{grid-template-columns:1fr}}@media(prefers-reduced-motion:reduce){#vacnet-settings-dialog *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}',
     );
 
+    installExtraSettingsSections(dialog);
+
     const enabledInput = dialog.querySelector("#demoscope-settings-sound-enabled");
     const volumeInput = dialog.querySelector("#demoscope-settings-volume");
     const volumeNumber = dialog.querySelector("#demoscope-settings-volume-number");
@@ -877,12 +941,17 @@
       changeKeyButton.textContent = settingText("settingsPressKey");
     });
     dialog.querySelector("#demoscope-settings-reset-defaults").addEventListener("click", () => {
-      if (!window.confirm(settingText("settingsResetConfirm"))) return;
+      if (!window.confirm(settingText("settingsResetConfirmAll"))) return;
       try {
         localStorage.removeItem(SOUND_ENABLED_STORAGE_KEY);
         localStorage.removeItem(SOUND_VOLUME_STORAGE_KEY);
         localStorage.removeItem(SETTINGS_HOTKEY_STORAGE_KEY);
       } catch { /* Defaults still take effect for this page load. */ }
+      resetAllBindings();
+      [ANIM_ENABLED_KEY, ANIM_STYLE_KEY, ANIM_SPEED_KEY].forEach((key) => writeStorage(key, null));
+      applyAnimationSettings();
+      document.getElementById("vacnet-animations-dialog")?.demoscopeSync?.();
+      refreshKeyLabels();
       enabledInput.checked = true;
       volumeInput.value = "40";
       volumeNumber.value = "40";
@@ -919,6 +988,1532 @@
     return dialog;
   }
 
+  // ---------------------------------------------------------------------------
+  // Resilience: isolated steps, lookups with fallbacks, a graceful "switch off"
+  // when the page is unrecognizable, and a diagnostics report for bug reports.
+  // ---------------------------------------------------------------------------
+  const SCRIPT_VERSION = "1.2.0";
+  const diag = { failures: [], disabled: "", originalSkeleton: "", events: [] };
+
+  // Notable runtime events for the diagnostics report (kept short and capped).
+  function recordEvent(kind, detail = "") {
+    diag.events.push({ at: Math.round(performance.now()), kind, detail: String(detail).slice(0, 180) });
+    if (diag.events.length > 25) diag.events.shift();
+  }
+
+  // Uncaught errors on the page. They may come from VACNet's own scripts, not
+  // from DemoScope, so the report labels them that way.
+  function installErrorCapture() {
+    if (diag.errorCaptureInstalled) return;
+    diag.errorCaptureInstalled = true;
+    window.addEventListener("error", (event) => {
+      const where = String(event.filename || "").split("/").pop().split("?")[0] || "unknown file";
+      recordEvent("page error", `${event.message || "error"} (${where}:${event.lineno || 0})`);
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      recordEvent("unhandled rejection", (reason && reason.message) || reason || "unknown");
+    });
+  }
+
+  function recordFailure(step, error) {
+    const message = String((error && error.message) || error).slice(0, 160);
+    diag.failures.push({ step, message });
+    if (diag.failures.length > 40) diag.failures.shift();
+    console.warn(LOG_PREFIX, `step "${step}" failed:`, error);
+  }
+
+  // One broken step must not stop the ones after it.
+  function safeStep(step, fn, fallback) {
+    try { return fn(); } catch (error) { recordFailure(step, error); return fallback; }
+  }
+
+  function getVideoContainer() {
+    const direct = document.querySelector(".videocontainer") || document.querySelector("[class*='videocontainer' i]");
+    if (direct) return direct;
+    const video = document.querySelector("video");
+    if (!video) return null;
+    return (video.closest(".video-js") || video).parentElement;
+  }
+
+  function getVerdictContainer() {
+    const direct = document.querySelector(".verdicts-container");
+    if (direct) return direct;
+    const block = document.querySelector(".verdict-block, .verdictbuttons");
+    if (!block) return null;
+    const inner = block.closest(".verdicts-container-inner");
+    return (inner || block).parentElement;
+  }
+
+  function getSubmitArea() {
+    const direct = document.getElementById("submitbuttons") || document.querySelector(".submitbuttons");
+    if (direct) return direct;
+    return document.getElementById("submitVerdictButton")?.parentElement || null;
+  }
+
+  function hasVerdictForm() {
+    return Boolean(document.querySelector('.verdictbuttons input[type="radio"]'));
+  }
+
+  function removeEnhancements() {
+    document.body.classList.remove("vacnet-enhanced", "vacnet-cheating-task");
+    ["vacnet-clip-history", "vacnet-shift-speed", "vacnet-enhance-bar", "vacnet-controls", "vacnet-submit-loading", "vacnet-review-rules"]
+      .forEach((id) => document.getElementById(id)?.remove());
+    document.querySelectorAll(".footer-container.vacnet-footer-hidden").forEach((el) => {
+      el.classList.remove("vacnet-footer-hidden");
+      el.style.removeProperty("display");
+    });
+    document.querySelectorAll(".demoscope-custom-footer").forEach((el) => el.remove());
+  }
+
+  // The page no longer looks like something DemoScope understands: leave Valve's
+  // own page untouched, keep only the settings window (with diagnostics).
+  function disableDemoScope(reason) {
+    diag.disabled = reason;
+    recordEvent("switched off", reason);
+    safeStep("removeEnhancements", removeEnhancements);
+    document.documentElement.dataset.dsDisabled = "1";
+    safeStep("hideLoading", () => { if (isSubmitPending()) hideSubmitLoadingOverlay(); });
+    safeStep("settingsUi", installSettingsUi);
+    let alreadyShown = false;
+    try {
+      alreadyShown = sessionStorage.getItem("demoscopeDisabledNotice") === reason;
+      sessionStorage.setItem("demoscopeDisabledNotice", reason);
+    } catch { /* Show the notice anyway. */ }
+    if (!alreadyShown) safeStep("notice", () => showToast(settingText("dsDisabledNotice"), "error", 9000));
+  }
+
+  function isOwnNode(el) {
+    const id = el.id || "";
+    const cls = typeof el.className === "string" ? el.className : "";
+    return /^(vacnet|demoscope|ds-)/.test(id) || /(^|\s)(vacnet|demoscope|ds-)/.test(cls);
+  }
+
+  function elementSignature(el) {
+    const tag = el.tagName.toLowerCase();
+    const id = el.id && !/\d{4,}/.test(el.id) ? `#${el.id}` : "";
+    const classes = Array.from(el.classList).filter((name) => !/^(vacnet|demoscope|ds-)/.test(name)).slice(0, 3).map((name) => `.${name}`).join("");
+    const extra = [];
+    if (el instanceof HTMLInputElement) extra.push(`[${el.type}${el.name ? ` name=${el.name}` : ""}${el.disabled ? " disabled" : ""}]`);
+    if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
+      const onclick = el.getAttribute("onclick");
+      if (onclick) extra.push(`[onclick=${onclick.slice(0, 32)}]`);
+      if (el instanceof HTMLAnchorElement && el.getAttribute("href")) extra.push(`[href=${el.getAttribute("href").split("?")[0].slice(0, 40)}]`);
+    }
+    if (el.hasAttribute("hidden")) extra.push("[hidden]");
+    return `${tag}${id}${classes}${extra.join("")}`;
+  }
+
+  // Tags, ids and classes only - never text - so the report holds no personal data.
+  function skeletonOf(root, maxDepth = 7, maxNodes = 170) {
+    const lines = [];
+    let count = 0;
+    const skip = /^(SCRIPT|STYLE|LINK|META|SVG|PATH|NOSCRIPT|TEMPLATE)$/i;
+    const walk = (el, depth) => {
+      if (count >= maxNodes) return;
+      const pad = "  ".repeat(depth);
+      lines.push(pad + elementSignature(el));
+      count += 1;
+      if (el.classList.contains("video-js")) { lines[lines.length - 1] += " (player internals skipped)"; return; }
+      const kids = Array.from(el.children).filter((kid) => !skip.test(kid.tagName) && !isOwnNode(kid));
+      if (depth >= maxDepth) { if (kids.length) lines.push(`${pad}  … ${kids.length} children`); return; }
+      let i = 0;
+      while (i < kids.length && count < maxNodes) {
+        const signature = elementSignature(kids[i]);
+        let j = i;
+        while (j + 1 < kids.length && elementSignature(kids[j + 1]) === signature) j += 1;
+        if (j > i) { lines.push(`${pad}  ${signature} ×${j - i + 1}`); count += 1; } else walk(kids[i], depth + 1);
+        i = j + 1;
+      }
+    };
+    walk(root, 0);
+    if (count >= maxNodes) lines.push("… (truncated)");
+    return lines.join("\n");
+  }
+
+  function captureOriginalSkeleton() {
+    const root = document.querySelector(".page-container") || document.querySelector("main") || document.body;
+    diag.originalSkeleton = safeStep("skeleton", () => skeletonOf(root), "");
+  }
+
+  function buildDiagnosticsReport() {
+    const lines = [];
+    const add = (text = "") => lines.push(text);
+    const pathKind = /\/vacnet\/createinvite/.test(location.pathname) ? "invite" : /\/vacnet\/?$/.test(location.pathname) ? "welcome" : "review";
+    const language = new URLSearchParams(location.search).get("l");
+    const task = isCheatingMode() ? "single question (cheating)" : document.querySelector('input[name="aimassist"]') ? "classic (four questions)" : "unknown";
+    add("DemoScope diagnostics");
+    add(`version: ${SCRIPT_VERSION}`);
+    add(`time: ${new Date().toISOString()}`);
+    add(`page: ${location.origin}${location.pathname}${language ? `?l=${language}` : ""}`);
+    add(`locale: ${getActiveLocale()} | browser language: ${navigator.language} | agent: ${navigator.userAgent}`);
+    add(`page kind: ${pathKind} | task: ${task}`);
+    add(`switched off: ${diag.disabled || "no"}`);
+    safeStep("reportEnvironment", () => {
+      const manager = typeof GM_info !== "undefined" && GM_info ? `${GM_info.scriptHandler || "userscript manager"} ${GM_info.version || ""}`.trim() : "unknown (GM_info unavailable)";
+      const media = (query) => (window.matchMedia ? window.matchMedia(query).matches : false);
+      add(`userscript manager: ${manager}`);
+      add(`viewport: ${window.innerWidth}x${window.innerHeight} @${window.devicePixelRatio}x | screen: ${screen.width}x${screen.height} | dark scheme: ${media("(prefers-color-scheme: dark)")} | reduced motion: ${media("(prefers-reduced-motion: reduce)")}`);
+      add(`html: data-ds-anim=${document.documentElement.dataset.dsAnim || "-"} data-ds-disabled=${document.documentElement.dataset.dsDisabled || "-"} | body classes: ${Array.from(document.body.classList).join(" ") || "-"}`);
+    });
+    add();
+    add("settings (non-sensitive):");
+    safeStep("reportSettings", () => {
+      const changedKeys = KEY_ACTIONS.filter((action) => getBinding(action.id) !== action.def).map((action) => `${action.id}=${getBinding(action.id) || "unassigned"}`);
+      let soundEnabled = "default"; let soundVolume = "default"; let languageMode = "default";
+      try {
+        soundEnabled = localStorage.getItem(SOUND_ENABLED_STORAGE_KEY) ?? "default";
+        soundVolume = localStorage.getItem(SOUND_VOLUME_STORAGE_KEY) ?? "default";
+        languageMode = localStorage.getItem(LANGUAGE_AUTO_STORAGE_KEY) === "true" ? "automatic" : `manual (${localStorage.getItem(LANGUAGE_STORAGE_KEY) || "none saved"})`;
+      } catch { /* storage unavailable */ }
+      add(`  language: ${languageMode} | sound: ${soundEnabled}, volume ${soundVolume} | history: ${isLocalHistoryEnabled() ? "on" : "off"}`);
+      add(`  animations: ${animEnabled() ? `on (${animStyle()}, ${animSpeedKey()})` : "off"}`);
+      add(`  hotkeys changed from default: ${changedKeys.length ? changedKeys.join(", ") : "none"}`);
+    });
+    add();
+    add("player:");
+    safeStep("reportPlayer", () => {
+      const videos = document.querySelectorAll("video");
+      const video = videos[0];
+      add(`  video elements: ${videos.length} | Video.js loaded: ${typeof PAGE.videojs === "function" ? "yes" : "no"} | player instance: ${getVjsPlayer() ? "yes" : "no"}`);
+      if (video) {
+        let source = "none";
+        try { const u = new URL(video.currentSrc || video.src, location.href); source = `${u.hostname}${u.pathname.match(/\.[a-z0-9]{2,4}$/i)?.[0] || ""}`; } catch { /* no usable source */ }
+        add(`  state: readyState ${video.readyState}, networkState ${video.networkState}, duration ${Number.isFinite(video.duration) ? video.duration.toFixed(1) : video.duration}s, time ${video.currentTime.toFixed(1)}s, paused ${video.paused}, muted ${video.muted}, rate ${video.playbackRate}x`);
+        add(`  source: ${source}`);
+      }
+    });
+    add();
+    add("checks (what the script expects on the page):");
+    const checks = [
+      ["video container", () => getVideoContainer()], ["video element", () => document.querySelectorAll("video")],
+      ["verdict column", () => document.querySelectorAll(".verdict-column")], ["verdicts container", () => document.querySelectorAll(".verdicts-container")],
+      ["verdict blocks", () => document.querySelectorAll(".verdict-block")], ["verdict radios", () => document.querySelectorAll('.verdictbuttons input[type="radio"]')],
+      ["submit area", () => getSubmitArea()], ["submit button", () => document.getElementById("submitVerdictButton"), () => (isCheatingMode() ? "appears after a verdict is chosen" : "")],
+      ["back button", () => document.getElementById("backbutton"), () => (isCheatingMode() ? "appears after a verdict is chosen" : "")], ["submit hint", () => document.getElementById("submithint")],
+      ["submit form", () => document.getElementById("submitverdictform")], ["page header", () => document.querySelector(".PageHeader")],
+      ["clip counter", () => document.querySelector(".ClipCount")], ["panel header", () => document.querySelector(".panel-header")],
+      ["task instructions", () => document.querySelector(".task-instructions")], ["review layout", () => document.querySelector(".review-layout")],
+      ["single-question block", () => document.getElementById("verdictbuttons_cheating")], ["classic aim input", () => document.querySelector('input[name="aimassist"]'), () => (isCheatingMode() ? "not used by the single-question task" : "")],
+      ["invite link", () => document.querySelector(".invite-link-p, .demoscope-invite-card"), () => (pathKind !== "invite" ? "invite page only" : "")],
+      ["DemoScope panel", () => document.getElementById("vacnet-clip-history")], ["DemoScope controls", () => document.getElementById("vacnet-controls")],
+      ["DemoScope quick verdicts", () => document.getElementById("vacnet-enhance-bar"), () => (isCheatingMode() ? "not used by the single-question task" : "")],
+    ];
+    for (const [name, probe, normalAbsence] of checks) {
+      let result;
+      try { result = probe(); } catch { result = null; }
+      const count = result && typeof result.length === "number" ? result.length : result ? 1 : 0;
+      if (!count && normalAbsence) {
+        const note = normalAbsence();
+        if (note) { add(`  absent  ${name} (${note})`); continue; }
+      }
+      add(`  ${count ? "ok     " : "MISSING"} ${name}${count > 1 ? ` (${count})` : ""}`);
+    }
+    add();
+    add(`step failures: ${diag.failures.length}`);
+    diag.failures.forEach((failure) => add(`  ${failure.step}: ${failure.message}`));
+    add();
+    add(`recent events and page errors (page errors may come from VACNet's own scripts): ${diag.events.length}`);
+    diag.events.forEach((event) => add(`  +${event.at}ms ${event.kind}${event.detail ? `: ${event.detail}` : ""}`));
+    add();
+    add("page structure before DemoScope changed it:");
+    add(diag.originalSkeleton || "  (not captured on this page)");
+    add();
+    add("page structure now:");
+    add(safeStep("skeletonNow", () => skeletonOf(document.querySelector(".page-container") || document.body), "  (failed)"));
+    return lines.join("\n");
+  }
+
+  function fallbackCopyText(text) {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.cssText = "position:fixed;opacity:0;pointer-events:none;";
+      document.body.append(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch { return false; }
+  }
+
+  async function copyDiagnostics(statusEl, textarea) { // resolves to true when the clipboard got the report
+    const text = buildDiagnosticsReport();
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; } catch { copied = fallbackCopyText(text); }
+    if (copied) {
+      statusEl.textContent = fmt(settingText("diagCopied"), { n: text.split("\n").length });
+      textarea.hidden = true;
+      playUiSound("confirm");
+    } else {
+      statusEl.textContent = settingText("diagFailed");
+      textarea.value = text;
+      textarea.hidden = false;
+      textarea.select();
+    }
+    return copied;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Configurable hotkeys: one registry for every action, user overrides stored
+  // in localStorage, conflict detection shared by all editing UIs.
+  // ---------------------------------------------------------------------------
+  const KEYBINDINGS_STORAGE_KEY = "demoscopeKeybindings";
+  const KEY_GROUPS = ["player", "navigation", "verdicts", "submit", "invite", "interface"];
+  const KEY_ACTIONS = [
+    { id: "playPause", group: "player", def: "Space" },
+    { id: "mute", group: "player", def: "KeyM" },
+    { id: "fullscreen", group: "player", def: "KeyF" },
+    { id: "seekBack", group: "navigation", def: "ArrowLeft" },
+    { id: "seekForward", group: "navigation", def: "ArrowRight" },
+    { id: "frameBack", group: "navigation", def: "Comma" },
+    { id: "frameForward", group: "navigation", def: "Period" },
+    { id: "speedBoost", group: "navigation", def: "Shift" },
+    { id: "quick1", group: "verdicts", def: "Digit1" },
+    { id: "quick2", group: "verdicts", def: "Digit2" },
+    { id: "quick3", group: "verdicts", def: "Digit3" },
+    { id: "quick4", group: "verdicts", def: "Digit4" },
+    { id: "quick5", group: "verdicts", def: "Digit5" },
+    { id: "proceed", group: "submit", def: "Enter" },
+    { id: "cancel", group: "submit", def: "Escape" },
+    { id: "inviteDone", group: "invite", def: "Enter" },
+    { id: "inviteClose", group: "invite", def: "Escape" },
+    { id: "settings", group: "interface", def: "F2" },
+  ];
+  const KEY_ACTION_BY_ID = new Map(KEY_ACTIONS.map((action) => [action.id, action]));
+  // Keys only clash inside one page: the invite page has no player, so Enter and
+  // Esc can mean something else there. "global" actions clash with everything.
+  const KEY_ACTION_SCOPE = { inviteDone: "invite", inviteClose: "invite", settings: "global" };
+  function keyScopeOf(id) { return KEY_ACTION_SCOPE[id] || "review"; }
+  function keyScopesOverlap(a, b) { return a === b || a === "global" || b === "global"; }
+  function currentKeyScope() {
+    return document.body && document.body.classList.contains("vacnet-invite-page") ? "invite" : "review";
+  }
+  const RESERVED_KEY_CODES = new Set([
+    "Tab", "Control", "Alt", "Meta", "CapsLock", "ContextMenu",
+    "F5", "F11", "F12", "Unidentified", "Dead",
+  ]);
+  let keyCaptureActive = false;
+  let keybindingCache = null;
+
+  function fmt(template, vars = {}) {
+    return String(template).replace(/\{(\w+)\}/g, (match, name) =>
+      Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : match);
+  }
+
+  function isModalOpen() {
+    return Boolean(document.querySelector("dialog[open]"));
+  }
+
+  // Left/right modifiers count as one key; the numpad mirrors the main row.
+  function normalizeKeyCode(code) {
+    if (!code) return "";
+    if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
+    if (code === "ControlLeft" || code === "ControlRight") return "Control";
+    if (code === "AltLeft" || code === "AltRight") return "Alt";
+    if (code === "MetaLeft" || code === "MetaRight") return "Meta";
+    if (code === "NumpadEnter") return "Enter";
+    const numpad = code.match(/^Numpad([0-9])$/);
+    if (numpad) return `Digit${numpad[1]}`;
+    return code;
+  }
+
+  function formatKeyLabel(code) {
+    if (!code) return "";
+    const special = {
+      Space: "Space", ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓",
+      Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Semicolon: ";", Quote: "'",
+      BracketLeft: "[", BracketRight: "]", Minus: "-", Equal: "=", Backquote: "`",
+      Escape: "Esc", Backspace: "⌫", Enter: "Enter", Shift: "Shift",
+      NumpadAdd: "Num +", NumpadSubtract: "Num -", NumpadMultiply: "Num *",
+      NumpadDivide: "Num /", NumpadDecimal: "Num .",
+    };
+    if (special[code]) return special[code];
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+    if (/^Numpad/.test(code)) return `Num ${code.slice(6)}`;
+    return code;
+  }
+
+  function loadKeyOverrides() {
+    if (keybindingCache) return keybindingCache;
+    const result = {};
+    try {
+      const parsed = JSON.parse(localStorage.getItem(KEYBINDINGS_STORAGE_KEY) || "{}");
+      if (parsed && typeof parsed === "object") {
+        for (const [id, value] of Object.entries(parsed)) {
+          if (id === "settings" || !KEY_ACTION_BY_ID.has(id)) continue;
+          if (typeof value === "string" && /^[A-Za-z0-9]*$/.test(value)) result[id] = value;
+        }
+      }
+    } catch { /* Ignore broken or unavailable storage. */ }
+    keybindingCache = result;
+    return result;
+  }
+
+  function saveKeyOverrides(overrides) {
+    keybindingCache = overrides;
+    try {
+      if (Object.keys(overrides).length) {
+        localStorage.setItem(KEYBINDINGS_STORAGE_KEY, JSON.stringify(overrides));
+      } else {
+        localStorage.removeItem(KEYBINDINGS_STORAGE_KEY);
+      }
+    } catch { /* The new binding stays active until the page reloads. */ }
+  }
+
+  function getBinding(id) {
+    const action = KEY_ACTION_BY_ID.get(id);
+    if (!action) return "";
+    if (id === "settings") return readSettingsHotkey();
+    const overrides = loadKeyOverrides();
+    return Object.prototype.hasOwnProperty.call(overrides, id) ? overrides[id] : action.def;
+  }
+
+  function setBinding(id, code) {
+    const action = KEY_ACTION_BY_ID.get(id);
+    if (!action) return;
+    if (id === "settings") {
+      try {
+        if (code === action.def) localStorage.removeItem(SETTINGS_HOTKEY_STORAGE_KEY);
+        else localStorage.setItem(SETTINGS_HOTKEY_STORAGE_KEY, code || "none");
+      } catch { /* Keep going without storage. */ }
+      return;
+    }
+    const overrides = { ...loadKeyOverrides() };
+    if (code === action.def) delete overrides[id];
+    else overrides[id] = code;
+    saveKeyOverrides(overrides);
+  }
+
+  function resetAllBindings() {
+    saveKeyOverrides({});
+    try { localStorage.removeItem(SETTINGS_HOTKEY_STORAGE_KEY); } catch { /* ignore */ }
+  }
+
+  function findKeyConflict(id, code) {
+    if (!code) return null;
+    return KEY_ACTIONS.find((action) =>
+      action.id !== id && getBinding(action.id) === code &&
+      keyScopesOverlap(keyScopeOf(action.id), keyScopeOf(id))) || null;
+  }
+
+  function getActionForEvent(event, scope = currentKeyScope()) {
+    const code = normalizeKeyCode(event.code);
+    if (!code) return null;
+    const action = KEY_ACTIONS.find((item) =>
+      getBinding(item.id) === code && keyScopesOverlap(keyScopeOf(item.id), scope));
+    return action ? action.id : null;
+  }
+
+  // "" when the key can be assigned, otherwise why not.
+  function validateKeyForAction(id, code) {
+    if (!code || RESERVED_KEY_CODES.has(code)) return "reserved";
+    if (code === "Shift" && id !== "speedBoost") return "shift";
+    return "";
+  }
+
+  function quickRangeLabel(count) {
+    const codes = Array.from({ length: count }, (_, index) => getBinding(`quick${index + 1}`));
+    if (codes.every((code, index) => code === `Digit${index + 1}`)) return `1–${count}`;
+    return codes.filter(Boolean).map(formatKeyLabel).join(" ") || "–";
+  }
+
+  function buildHintsInnerMarkup() {
+    const cheating = isCheatingMode();
+    const label = (id) => escapeHtml(formatKeyLabel(getBinding(id)) || "–");
+    const proceed = formatKeyLabel(getBinding("proceed")) || "–";
+    return `
+        <span><kbd>${escapeHtml(cheating ? proceed : `${proceed} ×2`)}</kbd> ${tr("submitHint")}</span>
+        <span><kbd>${escapeHtml(quickRangeLabel(cheating ? 3 : 5))}</kbd> ${tr(cheating ? "quickVerdict" : "presetsHint")}</span>
+        <span><kbd>${label("speedBoost")}</kbd> ${tr("accelerateHint")}</span>
+        <span><kbd>${label("seekBack")} ${label("seekForward")}</kbd> ±5 ${tr("seconds")}</span>
+        <span><kbd>${label("frameBack")} ${label("frameForward")}</kbd> ${tr("framesHint")}</span>
+        <span><kbd>${label("playPause")}</kbd> ${tr("pauseHint")}</span>
+        <span><kbd>${label("mute")}</kbd> ${tr("muteHint")}</span>
+        <span><kbd>${label("fullscreen")}</kbd> ${tr("fullscreenHint")}</span>
+      `;
+  }
+
+  // Everything on the page that shows a key name is refreshed from here.
+  function refreshKeyLabels() {
+    const hints = document.querySelector("#vacnet-controls .vacnet-hints");
+    if (hints) hints.innerHTML = buildHintsInnerMarkup();
+
+    const quickByPreset = { botaimwh: 1, aimwh: 2, rage: 3, legit: 4, uncertain: 5 };
+    document.querySelectorAll("#vacnet-enhance-bar .vacnet-enhance-bar-presets button[data-preset]").forEach((button) => {
+      const index = quickByPreset[button.dataset.preset];
+      const kbd = button.querySelector("kbd");
+      if (index && kbd) kbd.textContent = formatKeyLabel(getBinding(`quick${index}`)) || "–";
+    });
+    const barHint = document.querySelector("#vacnet-enhance-bar .vacnet-enhance-bar-hint");
+    if (barHint) barHint.textContent = tr("keys").replace(/1\s*[–-]\s*5/, quickRangeLabel(5));
+
+    localizeCheatingVerdicts();
+    refreshProceedButtonLabel();
+    refreshInviteKeyLabels();
+    refreshSettingsSummaries();
+  }
+
+  function refreshCancelButtonLabel() {
+    const back = document.getElementById("backbutton");
+    if (!(back instanceof HTMLButtonElement)) return;
+    const code = getBinding("cancel");
+    let kbd = back.querySelector(".vacnet-cancel-kbd");
+    if (!code) { kbd?.remove(); return; }
+    const label = formatKeyLabel(code);
+    if (!kbd) {
+      kbd = document.createElement("kbd");
+      kbd.className = "vacnet-cancel-kbd";
+      back.append(document.createTextNode(" "), kbd);
+    }
+    if (kbd.textContent !== label) kbd.textContent = label;
+  }
+
+  function invokeCancelAction() {
+    if (proceedArmed) {
+      resetProceedArmed();
+      playUiSound("click");
+      return true;
+    }
+    const back = document.getElementById("backbutton");
+    if (
+      !(back instanceof HTMLButtonElement) || back.disabled || back.hidden ||
+      back.style.display === "none" || back.offsetParent === null
+    ) return false;
+    playUiSound("click");
+    back.click();
+    return true;
+  }
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== KEYBINDINGS_STORAGE_KEY && event.key !== SETTINGS_HOTKEY_STORAGE_KEY) return;
+    keybindingCache = null;
+    refreshKeyLabels();
+  });
+
+  // New settings strings. Only English and Russian are written out; every
+  // other language falls back to English through settingText().
+  (function addExtraSettingsText() {
+    const enIndex = LOCALE_INDEX.indexOf("en");
+    const ruIndex = LOCALE_INDEX.indexOf("ru");
+    const add = (key, en, ru) => {
+      const row = new Array(LOCALE_INDEX.length).fill("");
+      row[enIndex] = en;
+      row[ruIndex] = ru;
+      SETTINGS_TEXT_ROWS[key] = row;
+    };
+
+    // Entry points in the settings window
+    add("hkOpenNote", "Reassign any key. You are warned before a key that is already in use is replaced.", "Назначайте любые клавиши. Если клавиша уже занята, вас предупредят до замены.");
+    add("hkOpenButton", "Customize hotkeys", "Настроить клавиши");
+    add("anOpenNote", "Style, speed and on/off switch for the DemoScope indicator, with live previews.", "Стиль, скорость и включение индикатора DemoScope с живым предпросмотром.");
+    add("anOpenButton", "Animation settings", "Настройки анимации");
+
+    // Hotkeys window
+    add("hkTitle", "Hotkeys", "Горячие клавиши");
+    add("hkIntro", "Click a key to change it, then press the new key. If it is already used, you will see where before anything is replaced.", "Нажмите на клавишу, чтобы изменить её, затем нажмите новую. Если она уже занята, вы увидите, где именно, прежде чем что-то заменится.");
+    add("hkChangeAria", "Change key: {action}", "Изменить клавишу: {action}");
+    add("hkPress", "Press a key…", "Нажмите клавишу…");
+    add("hkCancel", "Cancel", "Отмена");
+    add("hkResetOne", "Reset to default ({key})", "Сбросить по умолчанию ({key})");
+    add("hkResetAll", "Reset all", "Сбросить всё");
+    add("hkResetAllConfirm", "Click again to reset all", "Нажмите ещё раз, чтобы сбросить всё");
+    add("hkClose", "Close", "Закрыть");
+    add("hkNotSet", "Not set", "Не назначено");
+    add("hkChanged", "Changed", "Изменено");
+    add("hkConflictTitle", "This key is already in use", "Эта клавиша уже занята");
+    add("hkConflictBody", "{key} is assigned to “{action}” ({group}). {desc}", "{key} уже назначена на «{action}» ({group}). {desc}");
+    add("hkConflictHelp", "Replace: “{other}” will have no key.", "Заменить: у «{other}» не останется клавиши.");
+    add("hkConflictHelpSwap", "Replace: “{other}” will have no key. Swap: “{other}” gets {prev}.", "Заменить: у «{other}» не останется клавиши. Поменять: «{other}» получит {prev}.");
+    add("hkReplace", "Replace", "Заменить");
+    add("hkSwap", "Swap", "Поменять");
+    add("hkReserved", "This key can’t be used: it is reserved by the browser or needed for navigation.", "Эту клавишу нельзя использовать: она зарезервирована браузером или нужна для навигации.");
+    add("hkShiftOnly", "Shift can only be used for the hold action “Speed boost”.", "Shift можно использовать только для удерживаемого действия «Ускорение».");
+    add("hkSaved", "{action}: {key}", "{action}: {key}");
+    add("hkCleared", "“{action}” is now unassigned.", "У «{action}» больше нет клавиши.");
+    add("hkResetDone", "All hotkeys are back to their defaults.", "Все клавиши возвращены к значениям по умолчанию.");
+    add("hkUnchanged", "No change.", "Без изменений.");
+    add("hkConflictShort", "“{key}” is already used for “{action}”. Change it in Hotkeys.", "«{key}» уже используется для «{action}». Измените это в «Горячих клавишах».");
+
+    add("hkGroup_player", "Playback", "Воспроизведение");
+    add("hkGroup_navigation", "Navigation", "Навигация");
+    add("hkGroup_verdicts", "Verdicts", "Вердикты");
+    add("hkGroup_submit", "Submission", "Отправка");
+    add("hkGroup_interface", "Interface", "Интерфейс");
+
+    add("hkName_playPause", "Play / pause", "Воспроизведение / пауза");
+    add("hkDesc_playPause", "Pauses the clip or resumes playback.", "Ставит клип на паузу или продолжает воспроизведение.");
+    add("hkName_mute", "Sound on / off", "Звук вкл. / выкл.");
+    add("hkDesc_mute", "Mutes or unmutes the clip.", "Выключает или включает звук клипа.");
+    add("hkName_fullscreen", "Fullscreen", "Полный экран");
+    add("hkDesc_fullscreen", "Enters or leaves fullscreen mode.", "Включает или выключает полноэкранный режим.");
+    add("hkName_seekBack", "Rewind", "Назад");
+    add("hkDesc_seekBack", "Jumps 5 seconds back.", "Перематывает на 5 секунд назад.");
+    add("hkName_seekForward", "Forward", "Вперёд");
+    add("hkDesc_seekForward", "Jumps 5 seconds forward.", "Перематывает на 5 секунд вперёд.");
+    add("hkName_frameBack", "Previous frame", "Предыдущий кадр");
+    add("hkDesc_frameBack", "Steps back one frame.", "Шаг на один кадр назад.");
+    add("hkName_frameForward", "Next frame", "Следующий кадр");
+    add("hkDesc_frameForward", "Steps forward one frame.", "Шаг на один кадр вперёд.");
+    add("hkName_speedBoost", "Speed boost (hold)", "Ускорение (удерживать)");
+    add("hkDesc_speedBoost", "Plays faster while the key is held. The speed is chosen in the panel.", "Ускоряет воспроизведение, пока клавиша зажата. Скорость выбирается в панели.");
+    for (let n = 1; n <= 5; n += 1) {
+      add(`hkName_quick${n}`, `Quick verdict ${n}`, `Быстрый вердикт ${n}`);
+    }
+    add("hkDescQuick", "Classic form: {a}. Single-question task: {b}.", "Классическая форма: {a}. Задание с одним вопросом: {b}.");
+    add("hkDescQuickClassicOnly", "Classic form: {a}. Not used in the single-question task.", "Классическая форма: {a}. В задании с одним вопросом не используется.");
+    add("hkName_proceed", "Confirm / submit", "Подтвердить / отправить");
+    add("hkDesc_proceed", "Confirms the verdict and moves on. In the classic form press it twice: first arm, then send.", "Подтверждает вердикт и переходит дальше. В классической форме нажимается дважды: сначала подготовка, затем отправка.");
+    add("hkName_cancel", "Cancel verdict", "Отменить вердикт");
+    add("hkDesc_cancel", "Presses “Cancel” while a verdict waits for confirmation, or disarms the first Enter press.", "Нажимает «Отмена», пока вердикт ждёт подтверждения, или снимает первое нажатие Enter.");
+    add("hkName_settings", "DemoScope settings", "Настройки DemoScope");
+    add("hkDesc_settings", "Opens or closes the settings window.", "Открывает или закрывает окно настроек.");
+
+    // Animation window
+    add("anTitle", "Animations", "Анимации");
+    add("anIntro", "Choose how the DemoScope indicator looks. Previews play live.", "Выберите вид индикатора DemoScope. Предпросмотр проигрывается вживую.");
+    add("anEnabled", "Enable animations", "Включить анимации");
+    add("anSpeed", "Speed", "Скорость");
+    add("anSlow", "Slow", "Медленно");
+    add("anNormal", "Normal", "Обычно");
+    add("anFast", "Fast", "Быстро");
+    add("anStyle", "Style", "Стиль");
+    add("anOffNote", "Animations are off. Previews still play so you can compare.", "Анимации выключены. Предпросмотр всё равно проигрывается, чтобы можно было сравнить.");
+    add("anReset", "Reset", "Сбросить");
+    add("anStyle_pulse", "Pulse", "Пульс");
+    add("anStyleDesc_pulse", "A ring expands from the dot.", "От точки расходится кольцо.");
+    add("anStyle_breathe", "Breathe", "Дыхание");
+    add("anStyleDesc_breathe", "A soft glow that swells and fades.", "Мягкое свечение, которое нарастает и угасает.");
+    add("anStyle_ripple", "Ripple", "Волны");
+    add("anStyleDesc_ripple", "Two ripples, one after another.", "Две волны одна за другой.");
+    add("anStyle_heartbeat", "Heartbeat", "Сердцебиение");
+    add("anStyleDesc_heartbeat", "A quick double beat, then rest.", "Быстрый двойной удар и пауза.");
+    add("anStyle_orbit", "Orbit", "Орбита");
+    add("anStyleDesc_orbit", "A small spark circles the dot.", "Маленькая искра кружит вокруг точки.");
+    add("anStyle_blink", "Blink", "Мигание");
+    add("anStyleDesc_blink", "A simple fade in and out.", "Простое плавное угасание и возвращение.");
+
+    // Translations for the 27 other languages, in the order of EXTRA_KEYS.
+    const EXTRA_KEYS = ["hkOpenNote", "hkOpenButton", "anOpenNote", "anOpenButton", "hkTitle", "hkIntro", "hkChangeAria", "hkPress", "hkCancel", "hkResetOne", "hkResetAll", "hkResetAllConfirm", "hkClose", "hkNotSet", "hkConflictTitle", "hkConflictBody", "hkConflictHelp", "hkConflictHelpSwap", "hkReplace", "hkSwap", "hkReserved", "hkShiftOnly", "hkResetDone", "hkUnchanged", "hkConflictShort", "hkGroup_player", "hkGroup_navigation", "hkGroup_verdicts", "hkGroup_submit", "hkGroup_interface", "hkName_playPause", "hkDesc_playPause", "hkName_mute", "hkDesc_mute", "hkName_fullscreen", "hkDesc_fullscreen", "hkName_seekBack", "hkDesc_seekBack", "hkName_seekForward", "hkDesc_seekForward", "hkName_frameBack", "hkDesc_frameBack", "hkName_frameForward", "hkDesc_frameForward", "hkName_speedBoost", "hkDesc_speedBoost", "hkDescQuick", "hkDescQuickClassicOnly", "hkName_proceed", "hkDesc_proceed", "hkName_cancel", "hkDesc_cancel", "hkName_settings", "hkDesc_settings", "anTitle", "anIntro", "anEnabled", "anSpeed", "anSlow", "anNormal", "anFast", "anStyle", "anOffNote", "anReset", "anStyle_pulse", "anStyleDesc_pulse", "anStyle_breathe", "anStyleDesc_breathe", "anStyle_ripple", "anStyleDesc_ripple", "anStyle_heartbeat", "anStyleDesc_heartbeat", "anStyle_orbit", "anStyleDesc_orbit", "anStyle_blink", "anStyleDesc_blink", "hkName_quickN"];
+    const EXTRA_TRANSLATIONS = {
+      "bg": ["Назначавайте всеки клавиш. Ще получите предупреждение, преди да бъде заменен клавиш, който вече се използва.", "Настройка на клавишите", "Стил, скорост и включване/изключване на индикатора на DemoScope с предварителен преглед на живо.", "Настройки на анимацията", "Бързи клавиши", "Щракнете върху клавиш, за да го промените, после натиснете новия. Ако вече се използва, ще видите къде, преди нещо да бъде заменено.", "Промяна на клавиш: {action}", "Натиснете клавиш…", "Отказ", "Нулиране по подразбиране ({key})", "Нулирай всичко", "Щракнете отново за нулиране на всичко", "Затвори", "Не е зададен", "Този клавиш вече се използва", "{key} е зададен за „{action}“ ({group}). {desc}", "Замени: „{other}“ ще остане без клавиш.", "Замени: „{other}“ ще остане без клавиш. Размени: „{other}“ получава {prev}.", "Замени", "Размени", "Този клавиш не може да се използва: резервиран е от браузъра или е нужен за навигация.", "Shift може да се използва само за действието с задържане „Ускорение“.", "Всички клавиши са върнати към стойностите по подразбиране.", "Без промяна.", "„{key}“ вече се използва за „{action}“. Променете го в „Бързи клавиши“.", "Възпроизвеждане", "Навигация", "Вердикти", "Изпращане", "Интерфейс", "Пуск / пауза", "Спира клипа или продължава възпроизвеждането.", "Звук вкл. / изкл.", "Заглушава или включва звука на клипа.", "Цял екран", "Влиза в режим на цял екран или излиза от него.", "Назад", "Връща с 5 секунди назад.", "Напред", "Прескача с 5 секунди напред.", "Предишен кадър", "Връща с един кадър назад.", "Следващ кадър", "Преминава с един кадър напред.", "Ускорение (задържане)", "Възпроизвежда по-бързо, докато клавишът е натиснат. Скоростта се избира в панела.", "Класическа форма: {a}. Задача с един въпрос: {b}.", "Класическа форма: {a}. Не се използва в задачата с един въпрос.", "Потвърждаване / изпращане", "Потвърждава вердикта и продължава. В класическата форма се натиска два пъти: първо подготовка, после изпращане.", "Отмяна на вердикт", "Натиска „Отказ“, докато вердиктът чака потвърждение, или отменя първото натискане на Enter.", "Настройки на DemoScope", "Отваря или затваря прозореца с настройки.", "Анимации", "Изберете как изглежда индикаторът на DemoScope. Прегледите се възпроизвеждат на живо.", "Включи анимациите", "Скорост", "Бавно", "Нормално", "Бързо", "Стил", "Анимациите са изключени. Прегледите пак се възпроизвеждат, за да можете да сравнявате.", "Нулирай", "Пулс", "От точката се разпростира пръстен.", "Дишане", "Мека светлина, която нараства и угасва.", "Вълни", "Две вълни една след друга.", "Сърдечен ритъм", "Бърз двоен удар и пауза.", "Орбита", "Малка искра обикаля около точката.", "Мигане", "Просто плавно избледняване и връщане.", "Бърз вердикт {n}"],
+      "cs": ["Přiřaďte libovolnou klávesu. Před nahrazením již používané klávesy budete upozorněni.", "Nastavit klávesové zkratky", "Styl, rychlost a zapnutí/vypnutí indikátoru DemoScope s živým náhledem.", "Nastavení animací", "Klávesové zkratky", "Klikněte na klávesu, kterou chcete změnit, a stiskněte novou. Pokud je již používána, uvidíte kde, než se cokoli nahradí.", "Změnit klávesu: {action}", "Stiskněte klávesu…", "Zrušit", "Obnovit výchozí ({key})", "Obnovit vše", "Kliknutím znovu obnovíte vše", "Zavřít", "Nepřiřazeno", "Tato klávesa je již používána", "{key} je přiřazena akci „{action}“ ({group}). {desc}", "Nahradit: „{other}“ zůstane bez klávesy.", "Nahradit: „{other}“ zůstane bez klávesy. Prohodit: „{other}“ dostane {prev}.", "Nahradit", "Prohodit", "Tuto klávesu nelze použít: je vyhrazena prohlížeči nebo potřebná pro navigaci.", "Shift lze použít jen pro přidržovanou akci „Zrychlení“.", "Všechny klávesy byly vráceny na výchozí hodnoty.", "Beze změny.", "„{key}“ se již používá pro „{action}“. Změňte to v části Klávesové zkratky.", "Přehrávání", "Navigace", "Verdikty", "Odeslání", "Rozhraní", "Přehrát / pozastavit", "Pozastaví klip nebo obnoví přehrávání.", "Zvuk zap. / vyp.", "Ztlumí nebo zapne zvuk klipu.", "Celá obrazovka", "Zapne nebo ukončí režim celé obrazovky.", "Zpět", "Přeskočí o 5 sekund zpět.", "Vpřed", "Přeskočí o 5 sekund vpřed.", "Předchozí snímek", "Posune o jeden snímek zpět.", "Další snímek", "Posune o jeden snímek vpřed.", "Zrychlení (přidržet)", "Přehrává rychleji, dokud je klávesa přidržena. Rychlost se volí v panelu.", "Klasický formulář: {a}. Úloha s jednou otázkou: {b}.", "Klasický formulář: {a}. V úloze s jednou otázkou se nepoužívá.", "Potvrdit / odeslat", "Potvrdí verdikt a pokračuje. V klasickém formuláři se stiskne dvakrát: nejdřív příprava, potom odeslání.", "Zrušit verdikt", "Stiskne „Zrušit“, zatímco verdikt čeká na potvrzení, nebo zruší první stisk Enter.", "Nastavení DemoScope", "Otevře nebo zavře okno nastavení.", "Animace", "Vyberte vzhled indikátoru DemoScope. Náhledy se přehrávají živě.", "Zapnout animace", "Rychlost", "Pomalu", "Normálně", "Rychle", "Styl", "Animace jsou vypnuty. Náhledy se přesto přehrávají, abyste mohli porovnávat.", "Obnovit", "Puls", "Z tečky se rozšiřuje kruh.", "Dýchání", "Jemná záře, která sílí a slábne.", "Vlny", "Dvě vlny za sebou.", "Tlukot srdce", "Rychlý dvojitý úder a pauza.", "Oběžná dráha", "Malá jiskra krouží kolem tečky.", "Blikání", "Prosté plynulé pohasnutí a návrat.", "Rychlý verdikt {n}"],
+      "da": ["Tildel en vilkårlig tast. Du advares, før en tast, der allerede er i brug, erstattes.", "Tilpas genvejstaster", "Stil, hastighed og til/fra-kontakt til DemoScope-indikatoren med live-forhåndsvisning.", "Animationsindstillinger", "Genvejstaster", "Klik på en tast for at ændre den, og tryk derefter på den nye tast. Er den allerede i brug, kan du se hvor, før noget erstattes.", "Skift tast: {action}", "Tryk på en tast…", "Annuller", "Nulstil til standard ({key})", "Nulstil alle", "Klik igen for at nulstille alle", "Luk", "Ikke tildelt", "Denne tast er allerede i brug", "{key} er tildelt »{action}« ({group}). {desc}", "Erstat: »{other}« står uden tast.", "Erstat: »{other}« står uden tast. Byt: »{other}« får {prev}.", "Erstat", "Byt", "Denne tast kan ikke bruges: den er reserveret af browseren eller bruges til navigation.", "Shift kan kun bruges til holdehandlingen »Speedboost«.", "Alle genvejstaster er nulstillet til standard.", "Ingen ændring.", "»{key}« bruges allerede til »{action}«. Ændr det under Genvejstaster.", "Afspilning", "Navigation", "Vurderinger", "Indsendelse", "Grænseflade", "Afspil / pause", "Sætter klippet på pause eller genoptager afspilning.", "Lyd til / fra", "Slår lyden fra eller til.", "Fuld skærm", "Åbner eller forlader fuldskærmstilstand.", "Tilbage", "Hopper 5 sekunder tilbage.", "Frem", "Hopper 5 sekunder frem.", "Forrige billede", "Går ét billede tilbage.", "Næste billede", "Går ét billede frem.", "Speedboost (hold)", "Afspiller hurtigere, mens tasten holdes nede. Hastigheden vælges i panelet.", "Klassisk formular: {a}. Opgave med ét spørgsmål: {b}.", "Klassisk formular: {a}. Bruges ikke i opgaven med ét spørgsmål.", "Bekræft / send", "Bekræfter vurderingen og går videre. I den klassiske formular trykkes to gange: først klargør, derefter send.", "Fortryd vurdering", "Trykker på »Annuller«, mens en vurdering venter på bekræftelse, eller fortryder det første tryk på Enter.", "DemoScope-indstillinger", "Åbner eller lukker indstillingsvinduet.", "Animationer", "Vælg, hvordan DemoScope-indikatoren ser ud. Forhåndsvisninger afspilles live.", "Aktivér animationer", "Hastighed", "Langsom", "Normal", "Hurtig", "Stil", "Animationer er slået fra. Forhåndsvisningerne afspilles stadig, så du kan sammenligne.", "Nulstil", "Puls", "En ring udvider sig fra prikken.", "Åndedræt", "Et blødt skær, der svulmer op og toner ud.", "Bølger", "To bølger efter hinanden.", "Hjerteslag", "Et hurtigt dobbeltslag og så pause.", "Kredsløb", "En lille gnist kredser om prikken.", "Blink", "En enkel ind- og udtoning.", "Hurtig vurdering {n}"],
+      "de": ["Belegen Sie jede beliebige Taste neu. Sie werden gewarnt, bevor eine bereits verwendete Taste ersetzt wird.", "Tastenkürzel anpassen", "Stil, Geschwindigkeit und Ein/Aus-Schalter für den DemoScope-Indikator, mit Live-Vorschau.", "Animationseinstellungen", "Tastenkürzel", "Klicken Sie auf eine Taste, um sie zu ändern, und drücken Sie dann die neue Taste. Ist sie bereits belegt, sehen Sie, wo, bevor etwas ersetzt wird.", "Taste ändern: {action}", "Taste drücken …", "Abbrechen", "Auf Standard zurücksetzen ({key})", "Alle zurücksetzen", "Erneut klicken, um alles zurückzusetzen", "Schließen", "Nicht belegt", "Diese Taste ist bereits belegt", "{key} ist „{action}“ ({group}) zugewiesen. {desc}", "Ersetzen: „{other}“ hat dann keine Taste.", "Ersetzen: „{other}“ hat dann keine Taste. Tauschen: „{other}“ erhält {prev}.", "Ersetzen", "Tauschen", "Diese Taste kann nicht verwendet werden: Sie ist vom Browser reserviert oder für die Navigation nötig.", "Umschalt kann nur für die Halte-Aktion „Beschleunigung“ verwendet werden.", "Alle Tastenkürzel wurden auf die Standardwerte zurückgesetzt.", "Keine Änderung.", "„{key}“ wird bereits für „{action}“ verwendet. Ändern Sie das unter Tastenkürzel.", "Wiedergabe", "Navigation", "Urteile", "Absenden", "Oberfläche", "Wiedergabe / Pause", "Hält den Clip an oder setzt die Wiedergabe fort.", "Ton ein / aus", "Schaltet den Ton des Clips stumm oder wieder ein.", "Vollbild", "Wechselt in den Vollbildmodus oder beendet ihn.", "Zurückspulen", "Springt 5 Sekunden zurück.", "Vorspulen", "Springt 5 Sekunden vor.", "Vorheriges Bild", "Geht ein Bild zurück.", "Nächstes Bild", "Geht ein Bild vor.", "Beschleunigung (halten)", "Spielt schneller ab, solange die Taste gehalten wird. Die Geschwindigkeit wird im Panel gewählt.", "Klassisches Formular: {a}. Aufgabe mit einer Frage: {b}.", "Klassisches Formular: {a}. In der Aufgabe mit einer Frage nicht verwendet.", "Bestätigen / absenden", "Bestätigt das Urteil und geht weiter. Im klassischen Formular zweimal drücken: erst vorbereiten, dann senden.", "Urteil abbrechen", "Drückt „Abbrechen“, während ein Urteil auf Bestätigung wartet, oder nimmt den ersten Enter-Druck zurück.", "DemoScope-Einstellungen", "Öffnet oder schließt das Einstellungsfenster.", "Animationen", "Wählen Sie, wie der DemoScope-Indikator aussieht. Vorschauen laufen live.", "Animationen aktivieren", "Geschwindigkeit", "Langsam", "Normal", "Schnell", "Stil", "Animationen sind aus. Die Vorschauen laufen trotzdem, damit Sie vergleichen können.", "Zurücksetzen", "Puls", "Ein Ring breitet sich vom Punkt aus.", "Atmen", "Ein sanftes Leuchten, das anschwillt und verblasst.", "Wellen", "Zwei Wellen nacheinander.", "Herzschlag", "Ein schneller Doppelschlag, dann Ruhe.", "Umlaufbahn", "Ein kleiner Funke umkreist den Punkt.", "Blinken", "Ein einfaches Ein- und Ausblenden.", "Schnelles Urteil {n}"],
+      "el": ["Αντιστοιχίστε οποιοδήποτε πλήκτρο. Θα ειδοποιηθείτε πριν αντικατασταθεί ένα πλήκτρο που χρησιμοποιείται ήδη.", "Προσαρμογή συντομεύσεων", "Στυλ, ταχύτητα και διακόπτης ενεργοποίησης για τον δείκτη του DemoScope, με ζωντανές προεπισκοπήσεις.", "Ρυθμίσεις animation", "Συντομεύσεις πληκτρολογίου", "Κάντε κλικ σε ένα πλήκτρο για να το αλλάξετε και πατήστε το νέο πλήκτρο. Αν χρησιμοποιείται ήδη, θα δείτε πού πριν αντικατασταθεί οτιδήποτε.", "Αλλαγή πλήκτρου: {action}", "Πατήστε ένα πλήκτρο…", "Άκυρο", "Επαναφορά προεπιλογής ({key})", "Επαναφορά όλων", "Κάντε κλικ ξανά για επαναφορά όλων", "Κλείσιμο", "Δεν έχει οριστεί", "Αυτό το πλήκτρο χρησιμοποιείται ήδη", "Το {key} έχει αντιστοιχιστεί στο «{action}» ({group}). {desc}", "Αντικατάσταση: το «{other}» θα μείνει χωρίς πλήκτρο.", "Αντικατάσταση: το «{other}» θα μείνει χωρίς πλήκτρο. Ανταλλαγή: το «{other}» παίρνει το {prev}.", "Αντικατάσταση", "Ανταλλαγή", "Αυτό το πλήκτρο δεν μπορεί να χρησιμοποιηθεί: είναι δεσμευμένο από το πρόγραμμα περιήγησης ή απαραίτητο για την πλοήγηση.", "Το Shift μπορεί να χρησιμοποιηθεί μόνο για την ενέργεια παρατεταμένου πατήματος «Επιτάχυνση».", "Όλες οι συντομεύσεις επανήλθαν στις προεπιλογές.", "Καμία αλλαγή.", "Το «{key}» χρησιμοποιείται ήδη για το «{action}». Αλλάξτε το στις Συντομεύσεις πληκτρολογίου.", "Αναπαραγωγή", "Πλοήγηση", "Κρίσεις", "Υποβολή", "Διεπαφή", "Αναπαραγωγή / παύση", "Σταματά προσωρινά το κλιπ ή συνεχίζει την αναπαραγωγή.", "Ήχος ενεργός / σίγαση", "Σίγαση ή επαναφορά ήχου του κλιπ.", "Πλήρης οθόνη", "Μπαίνει ή βγαίνει από τη λειτουργία πλήρους οθόνης.", "Πίσω", "Πηγαίνει 5 δευτερόλεπτα πίσω.", "Μπροστά", "Πηγαίνει 5 δευτερόλεπτα μπροστά.", "Προηγούμενο καρέ", "Πηγαίνει ένα καρέ πίσω.", "Επόμενο καρέ", "Πηγαίνει ένα καρέ μπροστά.", "Επιτάχυνση (παρατεταμένο πάτημα)", "Παίζει πιο γρήγορα όσο κρατάτε πατημένο το πλήκτρο. Η ταχύτητα επιλέγεται στον πίνακα.", "Κλασική φόρμα: {a}. Εργασία με μία ερώτηση: {b}.", "Κλασική φόρμα: {a}. Δεν χρησιμοποιείται στην εργασία με μία ερώτηση.", "Επιβεβαίωση / αποστολή", "Επιβεβαιώνει την κρίση και προχωρά. Στην κλασική φόρμα πατιέται δύο φορές: πρώτα προετοιμασία, μετά αποστολή.", "Ακύρωση κρίσης", "Πατά «Άκυρο» όσο μια κρίση περιμένει επιβεβαίωση ή ακυρώνει το πρώτο πάτημα του Enter.", "Ρυθμίσεις DemoScope", "Ανοίγει ή κλείνει το παράθυρο ρυθμίσεων.", "Animations", "Επιλέξτε πώς φαίνεται ο δείκτης του DemoScope. Οι προεπισκοπήσεις παίζουν ζωντανά.", "Ενεργοποίηση animations", "Ταχύτητα", "Αργά", "Κανονικά", "Γρήγορα", "Στυλ", "Τα animations είναι απενεργοποιημένα. Οι προεπισκοπήσεις παίζουν ακόμη ώστε να μπορείτε να συγκρίνετε.", "Επαναφορά", "Παλμός", "Ένας δακτύλιος απλώνεται από την τελεία.", "Αναπνοή", "Μια απαλή λάμψη που φουσκώνει και σβήνει.", "Κύματα", "Δύο κύματα το ένα μετά το άλλο.", "Καρδιακός παλμός", "Ένας γρήγορος διπλός χτύπος και μετά παύση.", "Τροχιά", "Μια μικρή σπίθα κυκλώνει την τελεία.", "Αναλαμπή", "Μια απλή σταδιακή εμφάνιση και εξαφάνιση.", "Γρήγορη κρίση {n}"],
+      "es-419": ["Asigna cualquier tecla. Se te avisará antes de reemplazar una tecla que ya está en uso.", "Personalizar atajos", "Estilo, velocidad e interruptor de activación del indicador de DemoScope, con vistas previas en vivo.", "Configuración de animaciones", "Atajos de teclado", "Haz clic en una tecla para cambiarla y luego presiona la nueva tecla. Si ya está en uso, verás dónde antes de que se reemplace algo.", "Cambiar tecla: {action}", "Presiona una tecla…", "Cancelar", "Restablecer a predeterminado ({key})", "Restablecer todo", "Haz clic de nuevo para restablecer todo", "Cerrar", "Sin asignar", "Esta tecla ya está en uso", "{key} está asignada a «{action}» ({group}). {desc}", "Reemplazar: «{other}» se quedará sin tecla.", "Reemplazar: «{other}» se quedará sin tecla. Intercambiar: «{other}» recibe {prev}.", "Reemplazar", "Intercambiar", "Esta tecla no se puede usar: está reservada por el navegador o es necesaria para la navegación.", "Shift solo se puede usar para la acción de mantener presionado «Aceleración».", "Todos los atajos volvieron a sus valores predeterminados.", "Sin cambios.", "«{key}» ya se usa para «{action}». Cámbialo en Atajos de teclado.", "Reproducción", "Navegación", "Veredictos", "Envío", "Interfaz", "Reproducir / pausar", "Pausa el clip o reanuda la reproducción.", "Sonido activado / desactivado", "Silencia o reactiva el sonido del clip.", "Pantalla completa", "Entra o sale del modo de pantalla completa.", "Retroceder", "Salta 5 segundos hacia atrás.", "Avanzar", "Salta 5 segundos hacia adelante.", "Cuadro anterior", "Retrocede un cuadro.", "Cuadro siguiente", "Avanza un cuadro.", "Aceleración (mantener presionado)", "Reproduce más rápido mientras mantengas la tecla presionada. La velocidad se elige en el panel.", "Formulario clásico: {a}. Tarea de una sola pregunta: {b}.", "Formulario clásico: {a}. No se usa en la tarea de una sola pregunta.", "Confirmar / enviar", "Confirma el veredicto y continúa. En el formulario clásico se presiona dos veces: primero preparar, luego enviar.", "Cancelar veredicto", "Presiona «Cancelar» mientras un veredicto espera confirmación, o deshace la primera pulsación de Enter.", "Configuración de DemoScope", "Abre o cierra la ventana de configuración.", "Animaciones", "Elige cómo se ve el indicador de DemoScope. Las vistas previas se reproducen en vivo.", "Activar animaciones", "Velocidad", "Lenta", "Normal", "Rápida", "Estilo", "Las animaciones están desactivadas. Las vistas previas se siguen reproduciendo para que puedas comparar.", "Restablecer", "Pulso", "Un anillo se expande desde el punto.", "Respiración", "Un brillo suave que crece y se desvanece.", "Ondas", "Dos ondas, una tras otra.", "Latido", "Un doble latido rápido y luego una pausa.", "Órbita", "Una pequeña chispa gira alrededor del punto.", "Parpadeo", "Un simple fundido de entrada y salida.", "Veredicto rápido {n}"],
+      "es-ES": ["Asigna cualquier tecla. Se te avisará antes de sustituir una tecla que ya está en uso.", "Personalizar atajos", "Estilo, velocidad e interruptor de activación del indicador de DemoScope, con vistas previas en directo.", "Ajustes de animación", "Atajos de teclado", "Haz clic en una tecla para cambiarla y luego pulsa la nueva tecla. Si ya está en uso, verás dónde antes de que se sustituya nada.", "Cambiar tecla: {action}", "Pulsa una tecla…", "Cancelar", "Restablecer valor predeterminado ({key})", "Restablecer todo", "Haz clic de nuevo para restablecer todo", "Cerrar", "Sin asignar", "Esta tecla ya está en uso", "{key} está asignada a «{action}» ({group}). {desc}", "Sustituir: «{other}» se quedará sin tecla.", "Sustituir: «{other}» se quedará sin tecla. Intercambiar: «{other}» recibe {prev}.", "Sustituir", "Intercambiar", "Esta tecla no se puede usar: está reservada por el navegador o es necesaria para la navegación.", "Mayús solo se puede usar para la acción de mantener pulsado «Aceleración».", "Todos los atajos han vuelto a sus valores predeterminados.", "Sin cambios.", "«{key}» ya se usa para «{action}». Cámbialo en Atajos de teclado.", "Reproducción", "Navegación", "Veredictos", "Envío", "Interfaz", "Reproducir / pausa", "Pausa el clip o reanuda la reproducción.", "Sonido activado / desactivado", "Silencia o reactiva el sonido del clip.", "Pantalla completa", "Entra o sale del modo de pantalla completa.", "Retroceder", "Salta 5 segundos atrás.", "Avanzar", "Salta 5 segundos adelante.", "Fotograma anterior", "Retrocede un fotograma.", "Fotograma siguiente", "Avanza un fotograma.", "Aceleración (mantener pulsado)", "Reproduce más rápido mientras se mantiene la tecla. La velocidad se elige en el panel.", "Formulario clásico: {a}. Tarea de una sola pregunta: {b}.", "Formulario clásico: {a}. No se usa en la tarea de una sola pregunta.", "Confirmar / enviar", "Confirma el veredicto y continúa. En el formulario clásico se pulsa dos veces: primero preparar, después enviar.", "Cancelar veredicto", "Pulsa «Cancelar» mientras un veredicto espera confirmación, o deshace la primera pulsación de Intro.", "Ajustes de DemoScope", "Abre o cierra la ventana de ajustes.", "Animaciones", "Elige el aspecto del indicador de DemoScope. Las vistas previas se reproducen en directo.", "Activar animaciones", "Velocidad", "Lenta", "Normal", "Rápida", "Estilo", "Las animaciones están desactivadas. Las vistas previas se siguen reproduciendo para que puedas comparar.", "Restablecer", "Pulso", "Un anillo se expande desde el punto.", "Respiración", "Un brillo suave que crece y se desvanece.", "Ondas", "Dos ondas, una tras otra.", "Latido", "Un doble latido rápido y luego una pausa.", "Órbita", "Una pequeña chispa gira alrededor del punto.", "Parpadeo", "Un simple fundido de entrada y salida.", "Veredicto rápido {n}"],
+      "fi": ["Määritä mikä tahansa näppäin. Sinua varoitetaan, ennen kuin jo käytössä oleva näppäin korvataan.", "Mukauta pikanäppäimet", "DemoScope-ilmaisimen tyyli, nopeus ja päälle/pois-kytkin reaaliaikaisilla esikatseluilla.", "Animaatioasetukset", "Pikanäppäimet", "Napsauta näppäintä muuttaaksesi sitä ja paina sitten uutta näppäintä. Jos se on jo käytössä, näet missä, ennen kuin mitään korvataan.", "Vaihda näppäin: {action}", "Paina näppäintä…", "Peruuta", "Palauta oletus ({key})", "Palauta kaikki", "Napsauta uudelleen palauttaaksesi kaiken", "Sulje", "Ei määritetty", "Tämä näppäin on jo käytössä", "{key} on määritetty toiminnolle ”{action}” ({group}). {desc}", "Korvaa: ”{other}” jää ilman näppäintä.", "Korvaa: ”{other}” jää ilman näppäintä. Vaihda: ”{other}” saa näppäimen {prev}.", "Korvaa", "Vaihda", "Tätä näppäintä ei voi käyttää: selain on varannut sen tai sitä tarvitaan navigointiin.", "Shiftiä voi käyttää vain pitämällä painettavaan toimintoon ”Nopeutus”.", "Kaikki pikanäppäimet on palautettu oletuksiin.", "Ei muutoksia.", "”{key}” on jo käytössä toiminnolle ”{action}”. Muuta se Pikanäppäimissä.", "Toisto", "Navigointi", "Arviot", "Lähetys", "Käyttöliittymä", "Toista / tauko", "Pysäyttää klipin tai jatkaa toistoa.", "Ääni päälle / pois", "Mykistää klipin tai palauttaa äänen.", "Koko näyttö", "Siirtyy koko näytön tilaan tai poistuu siitä.", "Taaksepäin", "Hyppää 5 sekuntia taaksepäin.", "Eteenpäin", "Hyppää 5 sekuntia eteenpäin.", "Edellinen ruutu", "Siirtyy yhden ruudun taaksepäin.", "Seuraava ruutu", "Siirtyy yhden ruudun eteenpäin.", "Nopeutus (pidä painettuna)", "Toistaa nopeammin, kun näppäintä pidetään painettuna. Nopeus valitaan paneelissa.", "Perinteinen lomake: {a}. Yhden kysymyksen tehtävä: {b}.", "Perinteinen lomake: {a}. Ei käytössä yhden kysymyksen tehtävässä.", "Vahvista / lähetä", "Vahvistaa arvion ja siirtyy eteenpäin. Perinteisessä lomakkeessa painetaan kahdesti: ensin valmistelu, sitten lähetys.", "Peruuta arvio", "Painaa ”Peruuta”, kun arvio odottaa vahvistusta, tai peruu ensimmäisen Enter-painalluksen.", "DemoScope-asetukset", "Avaa tai sulkee asetusikkunan.", "Animaatiot", "Valitse, miltä DemoScope-ilmaisin näyttää. Esikatselut toistuvat reaaliajassa.", "Ota animaatiot käyttöön", "Nopeus", "Hidas", "Normaali", "Nopea", "Tyyli", "Animaatiot ovat pois päältä. Esikatselut toistuvat silti, jotta voit vertailla.", "Palauta", "Pulssi", "Rengas laajenee pisteestä.", "Hengitys", "Pehmeä hehku, joka kasvaa ja himmenee.", "Aallot", "Kaksi aaltoa peräkkäin.", "Sydämenlyönti", "Nopea kaksoislyönti ja tauko.", "Kiertorata", "Pieni kipinä kiertää pistettä.", "Vilkunta", "Yksinkertainen häivytys sisään ja ulos.", "Pika-arvio {n}"],
+      "fr": ["Réattribuez n’importe quelle touche. Vous êtes averti avant le remplacement d’une touche déjà utilisée.", "Personnaliser les raccourcis", "Style, vitesse et activation de l’indicateur DemoScope, avec aperçus en direct.", "Paramètres d’animation", "Raccourcis clavier", "Cliquez sur une touche pour la modifier, puis appuyez sur la nouvelle touche. Si elle est déjà utilisée, vous verrez où avant que quoi que ce soit soit remplacé.", "Modifier la touche : {action}", "Appuyez sur une touche…", "Annuler", "Rétablir par défaut ({key})", "Tout réinitialiser", "Cliquez à nouveau pour tout réinitialiser", "Fermer", "Non attribuée", "Cette touche est déjà utilisée", "{key} est attribuée à « {action} » ({group}). {desc}", "Remplacer : « {other} » n’aura plus de touche.", "Remplacer : « {other} » n’aura plus de touche. Échanger : « {other} » reçoit {prev}.", "Remplacer", "Échanger", "Cette touche ne peut pas être utilisée : elle est réservée par le navigateur ou nécessaire à la navigation.", "Maj ne peut servir qu’à l’action maintenue « Accélération ».", "Tous les raccourcis ont été rétablis par défaut.", "Aucun changement.", "« {key} » est déjà utilisée pour « {action} ». Modifiez-la dans Raccourcis clavier.", "Lecture", "Navigation", "Verdicts", "Envoi", "Interface", "Lecture / pause", "Met le clip en pause ou reprend la lecture.", "Son activé / coupé", "Coupe ou rétablit le son du clip.", "Plein écran", "Active ou quitte le mode plein écran.", "Reculer", "Recule de 5 secondes.", "Avancer", "Avance de 5 secondes.", "Image précédente", "Recule d’une image.", "Image suivante", "Avance d’une image.", "Accélération (maintenir)", "Lit plus vite tant que la touche est maintenue. La vitesse se choisit dans le panneau.", "Formulaire classique : {a}. Tâche à une seule question : {b}.", "Formulaire classique : {a}. Non utilisée dans la tâche à une seule question.", "Confirmer / envoyer", "Confirme le verdict et passe à la suite. Dans le formulaire classique, appuyez deux fois : d’abord armer, puis envoyer.", "Annuler le verdict", "Appuie sur « Annuler » pendant qu’un verdict attend sa confirmation, ou annule le premier appui sur Entrée.", "Paramètres de DemoScope", "Ouvre ou ferme la fenêtre des paramètres.", "Animations", "Choisissez l’apparence de l’indicateur DemoScope. Les aperçus se jouent en direct.", "Activer les animations", "Vitesse", "Lente", "Normale", "Rapide", "Style", "Les animations sont désactivées. Les aperçus continuent de se jouer pour que vous puissiez comparer.", "Réinitialiser", "Pulsation", "Un anneau s’étend à partir du point.", "Respiration", "Une douce lueur qui gonfle puis s’estompe.", "Ondes", "Deux ondes l’une après l’autre.", "Battement de cœur", "Un double battement rapide, puis une pause.", "Orbite", "Une petite étincelle tourne autour du point.", "Clignotement", "Un simple fondu entrant et sortant.", "Verdict rapide {n}"],
+      "hu": ["Rendeljen hozzá bármilyen billentyűt. Figyelmeztetést kap, mielőtt egy már használt billentyű lecserélődne.", "Gyorsbillentyűk testreszabása", "A DemoScope jelző stílusa, sebessége és ki/be kapcsolója élő előnézettel.", "Animációbeállítások", "Gyorsbillentyűk", "Kattintson egy billentyűre a módosításhoz, majd nyomja meg az újat. Ha már használatban van, a csere előtt látni fogja, hol.", "Billentyű módosítása: {action}", "Nyomjon meg egy billentyűt…", "Mégse", "Alapértelmezés visszaállítása ({key})", "Összes visszaállítása", "Kattintson újra az összes visszaállításához", "Bezárás", "Nincs beállítva", "Ez a billentyű már használatban van", "A(z) {key} a(z) „{action}” ({group}) művelethez van rendelve. {desc}", "Csere: a(z) „{other}” billentyű nélkül marad.", "Csere: a(z) „{other}” billentyű nélkül marad. Felcserélés: a(z) „{other}” megkapja ezt: {prev}.", "Csere", "Felcserélés", "Ez a billentyű nem használható: a böngésző fenntartja, vagy a navigációhoz kell.", "A Shift csak a nyomva tartható „Gyorsítás” műveletre használható.", "Minden gyorsbillentyű visszaállt az alapértelmezettre.", "Nincs változás.", "A(z) „{key}” már használatban van ehhez: „{action}”. Módosítsa a Gyorsbillentyűk között.", "Lejátszás", "Navigáció", "Ítéletek", "Beküldés", "Felület", "Lejátszás / szünet", "Szünetelteti a klipet, vagy folytatja a lejátszást.", "Hang be / ki", "Elnémítja vagy visszakapcsolja a klip hangját.", "Teljes képernyő", "Belép a teljes képernyős módba, vagy kilép belőle.", "Visszatekerés", "5 másodpercet ugrik vissza.", "Előretekerés", "5 másodpercet ugrik előre.", "Előző képkocka", "Egy képkockát lép vissza.", "Következő képkocka", "Egy képkockát lép előre.", "Gyorsítás (nyomva tartva)", "Gyorsabban játszik le, amíg a billentyű le van nyomva. A sebességet a panelen lehet kiválasztani.", "Klasszikus űrlap: {a}. Egykérdéses feladat: {b}.", "Klasszikus űrlap: {a}. Az egykérdéses feladatban nem használatos.", "Megerősítés / beküldés", "Megerősíti az ítéletet, és továbblép. A klasszikus űrlapon kétszer kell megnyomni: először előkészít, aztán elküld.", "Ítélet visszavonása", "Megnyomja a „Mégse” gombot, amíg egy ítélet megerősítésre vár, vagy visszavonja az első Enter-lenyomást.", "DemoScope-beállítások", "Megnyitja vagy bezárja a beállítási ablakot.", "Animációk", "Válassza ki, milyen legyen a DemoScope jelző. Az előnézetek élőben játszódnak le.", "Animációk engedélyezése", "Sebesség", "Lassú", "Normál", "Gyors", "Stílus", "Az animációk ki vannak kapcsolva. Az előnézetek így is lejátszódnak, hogy összehasonlíthassa őket.", "Visszaállítás", "Pulzálás", "Egy gyűrű tágul a pontból.", "Lélegzés", "Lágy fény, amely erősödik, majd elhalványul.", "Hullámok", "Két hullám egymás után.", "Szívverés", "Gyors kettős dobbanás, majd szünet.", "Pálya", "Egy kis szikra kering a pont körül.", "Villogás", "Egyszerű be- és kihalványulás.", "Gyors ítélet {n}"],
+      "id": ["Tetapkan tombol apa pun. Anda akan diperingatkan sebelum tombol yang sudah dipakai diganti.", "Atur pintasan", "Gaya, kecepatan, dan saklar aktif/nonaktif untuk indikator DemoScope, dengan pratinjau langsung.", "Pengaturan animasi", "Pintasan keyboard", "Klik sebuah tombol untuk mengubahnya, lalu tekan tombol baru. Jika sudah dipakai, Anda akan melihat di mana sebelum apa pun diganti.", "Ubah tombol: {action}", "Tekan sebuah tombol…", "Batal", "Atur ulang ke default ({key})", "Atur ulang semua", "Klik lagi untuk mengatur ulang semua", "Tutup", "Belum diatur", "Tombol ini sudah dipakai", "{key} ditetapkan untuk “{action}” ({group}). {desc}", "Ganti: “{other}” tidak akan punya tombol.", "Ganti: “{other}” tidak akan punya tombol. Tukar: “{other}” mendapat {prev}.", "Ganti", "Tukar", "Tombol ini tidak dapat dipakai: dicadangkan oleh browser atau diperlukan untuk navigasi.", "Shift hanya dapat dipakai untuk aksi tahan “Percepatan”.", "Semua pintasan dikembalikan ke default.", "Tidak ada perubahan.", "“{key}” sudah dipakai untuk “{action}”. Ubah di Pintasan keyboard.", "Pemutaran", "Navigasi", "Vonis", "Pengiriman", "Antarmuka", "Putar / jeda", "Menjeda klip atau melanjutkan pemutaran.", "Suara hidup / mati", "Membisukan atau menyalakan suara klip.", "Layar penuh", "Masuk atau keluar dari mode layar penuh.", "Mundur", "Melompat 5 detik ke belakang.", "Maju", "Melompat 5 detik ke depan.", "Frame sebelumnya", "Mundur satu frame.", "Frame berikutnya", "Maju satu frame.", "Percepatan (tahan)", "Memutar lebih cepat selama tombol ditahan. Kecepatan dipilih di panel.", "Formulir klasik: {a}. Tugas satu pertanyaan: {b}.", "Formulir klasik: {a}. Tidak dipakai pada tugas satu pertanyaan.", "Konfirmasi / kirim", "Mengonfirmasi vonis dan lanjut. Pada formulir klasik tekan dua kali: pertama siapkan, lalu kirim.", "Batalkan vonis", "Menekan “Batal” saat vonis menunggu konfirmasi, atau membatalkan penekanan Enter pertama.", "Pengaturan DemoScope", "Membuka atau menutup jendela pengaturan.", "Animasi", "Pilih tampilan indikator DemoScope. Pratinjau diputar langsung.", "Aktifkan animasi", "Kecepatan", "Lambat", "Normal", "Cepat", "Gaya", "Animasi nonaktif. Pratinjau tetap diputar agar Anda bisa membandingkan.", "Atur ulang", "Denyut", "Sebuah cincin melebar dari titik.", "Bernapas", "Cahaya lembut yang membesar lalu memudar.", "Riak", "Dua riak berurutan.", "Detak jantung", "Dua detak cepat, lalu jeda.", "Orbit", "Percikan kecil mengelilingi titik.", "Kedip", "Pudar masuk dan keluar sederhana.", "Vonis cepat {n}"],
+      "it": ["Assegna qualsiasi tasto. Verrai avvisato prima che un tasto già in uso venga sostituito.", "Personalizza scorciatoie", "Stile, velocità e interruttore on/off dell’indicatore di DemoScope, con anteprime dal vivo.", "Impostazioni animazioni", "Scorciatoie da tastiera", "Clicca su un tasto per cambiarlo, poi premi il nuovo tasto. Se è già in uso, vedrai dove prima che venga sostituito qualcosa.", "Cambia tasto: {action}", "Premi un tasto…", "Annulla", "Ripristina predefinito ({key})", "Ripristina tutto", "Clicca di nuovo per ripristinare tutto", "Chiudi", "Non assegnato", "Questo tasto è già in uso", "{key} è assegnato a «{action}» ({group}). {desc}", "Sostituisci: «{other}» resterà senza tasto.", "Sostituisci: «{other}» resterà senza tasto. Scambia: «{other}» riceve {prev}.", "Sostituisci", "Scambia", "Questo tasto non può essere usato: è riservato dal browser o necessario per la navigazione.", "Maiusc può essere usato solo per l’azione a tasto premuto «Accelerazione».", "Tutte le scorciatoie sono tornate ai valori predefiniti.", "Nessuna modifica.", "«{key}» è già usato per «{action}». Modificalo in Scorciatoie da tastiera.", "Riproduzione", "Navigazione", "Verdetti", "Invio", "Interfaccia", "Riproduci / pausa", "Mette in pausa la clip o riprende la riproduzione.", "Audio attivo / disattivato", "Silenzia o riattiva l’audio della clip.", "Schermo intero", "Entra o esce dalla modalità schermo intero.", "Indietro", "Salta indietro di 5 secondi.", "Avanti", "Salta avanti di 5 secondi.", "Fotogramma precedente", "Torna indietro di un fotogramma.", "Fotogramma successivo", "Avanza di un fotogramma.", "Accelerazione (tieni premuto)", "Riproduce più velocemente finché il tasto è premuto. La velocità si sceglie nel pannello.", "Modulo classico: {a}. Compito a una domanda: {b}.", "Modulo classico: {a}. Non usato nel compito a una domanda.", "Conferma / invia", "Conferma il verdetto e prosegue. Nel modulo classico si preme due volte: prima prepara, poi invia.", "Annulla verdetto", "Preme «Annulla» mentre un verdetto attende conferma, oppure annulla la prima pressione di Invio.", "Impostazioni di DemoScope", "Apre o chiude la finestra delle impostazioni.", "Animazioni", "Scegli l’aspetto dell’indicatore di DemoScope. Le anteprime vengono riprodotte dal vivo.", "Attiva animazioni", "Velocità", "Lenta", "Normale", "Veloce", "Stile", "Le animazioni sono disattivate. Le anteprime vengono comunque riprodotte per poterle confrontare.", "Ripristina", "Impulso", "Un anello si espande dal punto.", "Respiro", "Un bagliore morbido che cresce e svanisce.", "Onde", "Due onde una dopo l’altra.", "Battito", "Un rapido doppio battito, poi pausa.", "Orbita", "Una piccola scintilla gira attorno al punto.", "Lampeggio", "Una semplice dissolvenza in entrata e in uscita.", "Verdetto rapido {n}"],
+      "ja": ["任意のキーを割り当てできます。すでに使われているキーを置き換える前に警告が表示されます。", "ショートカットをカスタマイズ", "DemoScope インジケーターのスタイル・速度・オン/オフの切り替えです。ライブプレビュー付き。", "アニメーション設定", "ショートカットキー", "キーをクリックして変更し、新しいキーを押してください。すでに使われている場合は、置き換える前にその場所が表示されます。", "キーを変更：{action}", "キーを押してください…", "キャンセル", "デフォルトに戻す（{key}）", "すべてリセット", "もう一度クリックするとすべてリセットします", "閉じる", "未設定", "このキーはすでに使われています", "{key} は「{action}」（{group}）に割り当てられています。{desc}", "置き換え：「{other}」のキーはなくなります。", "置き換え：「{other}」のキーはなくなります。入れ替え：「{other}」に {prev} が割り当てられます。", "置き換え", "入れ替え", "このキーは使用できません。ブラウザで予約されているか、ナビゲーションに必要です。", "Shift は押し続ける操作「加速」にのみ使用できます。", "すべてのショートカットを初期設定に戻しました。", "変更はありません。", "「{key}」はすでに「{action}」に使われています。ショートカットキーで変更してください。", "再生", "ナビゲーション", "判定", "送信", "インターフェース", "再生 / 一時停止", "クリップを一時停止、または再生を再開します。", "音声オン / オフ", "クリップの音声をミュート、またはミュート解除します。", "全画面", "全画面表示に切り替え、または終了します。", "巻き戻し", "5 秒戻ります。", "早送り", "5 秒進みます。", "前のフレーム", "1 フレーム戻ります。", "次のフレーム", "1 フレーム進みます。", "加速（押し続ける）", "キーを押している間、速く再生します。速度はパネルで選択します。", "従来のフォーム：{a}。単一質問タスク：{b}。", "従来のフォーム：{a}。単一質問タスクでは使いません。", "確定 / 送信", "判定を確定して次へ進みます。従来のフォームでは 2 回押します（1 回目で準備、2 回目で送信）。", "判定を取り消す", "判定が確認待ちのときに「キャンセル」を押す、または 1 回目の Enter を取り消します。", "DemoScope 設定", "設定ウィンドウを開く、または閉じます。", "アニメーション", "DemoScope インジケーターの見た目を選びます。プレビューはライブで再生されます。", "アニメーションを有効にする", "速度", "遅い", "標準", "速い", "スタイル", "アニメーションはオフです。比較できるよう、プレビューは再生されます。", "リセット", "パルス", "点から輪が広がります。", "呼吸", "やわらかな光が膨らんで消えていきます。", "波紋", "2 つの波紋が順に広がります。", "鼓動", "素早い二拍のあと、休止します。", "軌道", "小さな火花が点の周りを回ります。", "点滅", "シンプルなフェードイン・フェードアウト。", "クイック判定 {n}"],
+      "ko": ["원하는 키를 지정하세요. 이미 사용 중인 키를 바꾸기 전에 경고가 표시됩니다.", "단축키 설정", "DemoScope 표시기의 스타일, 속도, 켜기/끄기를 실시간 미리보기와 함께 설정합니다.", "애니메이션 설정", "단축키", "키를 클릭해 변경한 다음 새 키를 누르세요. 이미 사용 중이면 교체하기 전에 어디에 쓰이는지 표시됩니다.", "키 변경: {action}", "키를 누르세요…", "취소", "기본값으로 재설정 ({key})", "모두 재설정", "다시 클릭하면 모두 재설정됩니다", "닫기", "지정 안 됨", "이 키는 이미 사용 중입니다", "{key} 키는 “{action}”({group})에 지정되어 있습니다. {desc}", "교체: “{other}”에는 키가 없어집니다.", "교체: “{other}”에는 키가 없어집니다. 맞바꾸기: “{other}”가 {prev} 키를 받습니다.", "교체", "맞바꾸기", "이 키는 사용할 수 없습니다. 브라우저에서 예약되어 있거나 탐색에 필요합니다.", "Shift는 누르고 있는 동작인 “가속”에만 사용할 수 있습니다.", "모든 단축키가 기본값으로 돌아갔습니다.", "변경 없음.", "“{key}” 키는 이미 “{action}”에 사용 중입니다. 단축키에서 변경하세요.", "재생", "탐색", "판정", "제출", "인터페이스", "재생 / 일시정지", "클립을 일시정지하거나 재생을 이어갑니다.", "소리 켜기 / 끄기", "클립 소리를 음소거하거나 해제합니다.", "전체 화면", "전체 화면 모드로 들어가거나 나옵니다.", "뒤로 감기", "5초 뒤로 이동합니다.", "앞으로 감기", "5초 앞으로 이동합니다.", "이전 프레임", "한 프레임 뒤로 이동합니다.", "다음 프레임", "한 프레임 앞으로 이동합니다.", "가속 (누르고 있기)", "키를 누르고 있는 동안 더 빠르게 재생합니다. 속도는 패널에서 선택합니다.", "기존 양식: {a}. 단일 질문 작업: {b}.", "기존 양식: {a}. 단일 질문 작업에서는 사용하지 않습니다.", "확인 / 제출", "판정을 확인하고 다음으로 넘어갑니다. 기존 양식에서는 두 번 누릅니다. 먼저 준비하고 그다음 전송합니다.", "판정 취소", "판정이 확인을 기다리는 동안 “취소”를 누르거나 첫 번째 Enter 입력을 해제합니다.", "DemoScope 설정", "설정 창을 열거나 닫습니다.", "애니메이션", "DemoScope 표시기의 모양을 선택하세요. 미리보기는 실시간으로 재생됩니다.", "애니메이션 사용", "속도", "느리게", "보통", "빠르게", "스타일", "애니메이션이 꺼져 있습니다. 비교할 수 있도록 미리보기는 계속 재생됩니다.", "재설정", "펄스", "점에서 고리가 퍼져 나갑니다.", "숨쉬기", "부드러운 빛이 커졌다가 사라집니다.", "물결", "물결 두 개가 차례로 퍼집니다.", "심장박동", "빠른 두 번의 박동 뒤 잠시 쉽니다.", "궤도", "작은 불꽃이 점 주위를 돕니다.", "깜박임", "간단한 페이드 인·아웃.", "빠른 판정 {n}"],
+      "nl": ["Wijs elke toets toe. U krijgt een waarschuwing voordat een toets die al in gebruik is wordt vervangen.", "Sneltoetsen aanpassen", "Stijl, snelheid en aan/uit-schakelaar voor de DemoScope-indicator, met live voorbeelden.", "Animatie-instellingen", "Sneltoetsen", "Klik op een toets om die te wijzigen en druk dan op de nieuwe toets. Als die al in gebruik is, ziet u waar voordat er iets wordt vervangen.", "Toets wijzigen: {action}", "Druk op een toets…", "Annuleren", "Standaard herstellen ({key})", "Alles herstellen", "Klik nogmaals om alles te herstellen", "Sluiten", "Niet ingesteld", "Deze toets is al in gebruik", "{key} is toegewezen aan ‘{action}’ ({group}). {desc}", "Vervangen: ‘{other}’ heeft dan geen toets.", "Vervangen: ‘{other}’ heeft dan geen toets. Omwisselen: ‘{other}’ krijgt {prev}.", "Vervangen", "Omwisselen", "Deze toets kan niet worden gebruikt: hij is gereserveerd door de browser of nodig voor navigatie.", "Shift kan alleen worden gebruikt voor de ingedrukt-houden-actie ‘Snelheidsboost’.", "Alle sneltoetsen zijn teruggezet naar de standaardwaarden.", "Geen wijziging.", "‘{key}’ wordt al gebruikt voor ‘{action}’. Wijzig dat bij Sneltoetsen.", "Afspelen", "Navigatie", "Oordelen", "Verzenden", "Interface", "Afspelen / pauzeren", "Pauzeert de clip of hervat het afspelen.", "Geluid aan / uit", "Dempt de clip of zet het geluid weer aan.", "Volledig scherm", "Gaat naar of verlaat de modus volledig scherm.", "Terugspoelen", "Springt 5 seconden terug.", "Vooruit", "Springt 5 seconden vooruit.", "Vorig frame", "Gaat één frame terug.", "Volgend frame", "Gaat één frame vooruit.", "Snelheidsboost (ingedrukt houden)", "Speelt sneller af zolang de toets ingedrukt is. De snelheid kies je in het paneel.", "Klassiek formulier: {a}. Taak met één vraag: {b}.", "Klassiek formulier: {a}. Niet gebruikt in de taak met één vraag.", "Bevestigen / verzenden", "Bevestigt het oordeel en gaat verder. In het klassieke formulier druk je twee keer: eerst voorbereiden, dan verzenden.", "Oordeel annuleren", "Drukt op ‘Annuleren’ terwijl een oordeel op bevestiging wacht, of maakt de eerste Enter-druk ongedaan.", "DemoScope-instellingen", "Opent of sluit het instellingenvenster.", "Animaties", "Kies hoe de DemoScope-indicator eruitziet. Voorbeelden worden live afgespeeld.", "Animaties inschakelen", "Snelheid", "Langzaam", "Normaal", "Snel", "Stijl", "Animaties staan uit. Voorbeelden worden nog steeds afgespeeld zodat u kunt vergelijken.", "Herstellen", "Puls", "Een ring breidt zich uit vanaf de stip.", "Ademen", "Een zachte gloed die aanzwelt en vervaagt.", "Rimpelingen", "Twee rimpelingen na elkaar.", "Hartslag", "Een snelle dubbele slag, dan rust.", "Baan", "Een vonkje draait rond de stip.", "Knipperen", "Een eenvoudige fade in en uit.", "Snel oordeel {n}"],
+      "no": ["Tildel en hvilken som helst tast. Du blir varslet før en tast som allerede er i bruk erstattes.", "Tilpass hurtigtaster", "Stil, hastighet og av/på-bryter for DemoScope-indikatoren, med direkte forhåndsvisning.", "Animasjonsinnstillinger", "Hurtigtaster", "Klikk på en tast for å endre den, og trykk deretter på den nye tasten. Hvis den allerede er i bruk, ser du hvor før noe erstattes.", "Endre tast: {action}", "Trykk på en tast …", "Avbryt", "Tilbakestill til standard ({key})", "Tilbakestill alle", "Klikk igjen for å tilbakestille alle", "Lukk", "Ikke tildelt", "Denne tasten er allerede i bruk", "{key} er tildelt «{action}» ({group}). {desc}", "Erstatt: «{other}» står uten tast.", "Erstatt: «{other}» står uten tast. Bytt: «{other}» får {prev}.", "Erstatt", "Bytt", "Denne tasten kan ikke brukes: den er reservert av nettleseren eller trengs til navigasjon.", "Shift kan bare brukes til holdehandlingen «Fartsboost».", "Alle hurtigtaster er tilbakestilt til standard.", "Ingen endring.", "«{key}» brukes allerede til «{action}». Endre det under Hurtigtaster.", "Avspilling", "Navigasjon", "Vurderinger", "Innsending", "Grensesnitt", "Spill av / pause", "Setter klippet på pause eller fortsetter avspillingen.", "Lyd på / av", "Slår av eller på lyden til klippet.", "Fullskjerm", "Går til eller forlater fullskjermmodus.", "Spol tilbake", "Hopper 5 sekunder tilbake.", "Spol frem", "Hopper 5 sekunder frem.", "Forrige bilde", "Går ett bilde tilbake.", "Neste bilde", "Går ett bilde frem.", "Fartsboost (hold)", "Spiller av raskere mens tasten holdes nede. Hastigheten velges i panelet.", "Klassisk skjema: {a}. Oppgave med ett spørsmål: {b}.", "Klassisk skjema: {a}. Brukes ikke i oppgaven med ett spørsmål.", "Bekreft / send", "Bekrefter vurderingen og går videre. I det klassiske skjemaet trykker du to ganger: først klargjør, så send.", "Angre vurdering", "Trykker «Avbryt» mens en vurdering venter på bekreftelse, eller angrer det første trykket på Enter.", "DemoScope-innstillinger", "Åpner eller lukker innstillingsvinduet.", "Animasjoner", "Velg hvordan DemoScope-indikatoren ser ut. Forhåndsvisningene spilles av direkte.", "Slå på animasjoner", "Hastighet", "Sakte", "Normal", "Rask", "Stil", "Animasjoner er slått av. Forhåndsvisningene spilles fortsatt av, slik at du kan sammenligne.", "Tilbakestill", "Puls", "En ring utvider seg fra prikken.", "Pust", "Et mykt skjær som svulmer og tones ut.", "Bølger", "To bølger etter hverandre.", "Hjerteslag", "Et raskt dobbeltslag, så pause.", "Bane", "En liten gnist kretser rundt prikken.", "Blink", "En enkel inn- og uttoning.", "Rask vurdering {n}"],
+      "pl": ["Przypisz dowolny klawisz. Przed zastąpieniem klawisza, który jest już używany, zobaczysz ostrzeżenie.", "Dostosuj skróty klawiszowe", "Styl, szybkość i włącznik wskaźnika DemoScope z podglądem na żywo.", "Ustawienia animacji", "Skróty klawiszowe", "Kliknij klawisz, aby go zmienić, a następnie naciśnij nowy. Jeśli jest już używany, zobaczysz gdzie, zanim cokolwiek zostanie zastąpione.", "Zmień klawisz: {action}", "Naciśnij klawisz…", "Anuluj", "Przywróć domyślny ({key})", "Resetuj wszystko", "Kliknij ponownie, aby zresetować wszystko", "Zamknij", "Nie przypisano", "Ten klawisz jest już używany", "Klawisz {key} jest przypisany do „{action}” ({group}). {desc}", "Zastąp: „{other}” zostanie bez klawisza.", "Zastąp: „{other}” zostanie bez klawisza. Zamień: „{other}” otrzyma {prev}.", "Zastąp", "Zamień", "Tego klawisza nie można użyć: jest zarezerwowany przez przeglądarkę lub potrzebny do nawigacji.", "Shift można użyć tylko do akcji z przytrzymaniem „Przyspieszenie”.", "Wszystkie skróty przywrócono do ustawień domyślnych.", "Bez zmian.", "„{key}” jest już używany dla „{action}”. Zmień to w Skrótach klawiszowych.", "Odtwarzanie", "Nawigacja", "Werdykty", "Wysyłanie", "Interfejs", "Odtwarzaj / pauza", "Wstrzymuje klip lub wznawia odtwarzanie.", "Dźwięk wł. / wył.", "Wycisza lub włącza dźwięk klipu.", "Pełny ekran", "Włącza lub opuszcza tryb pełnoekranowy.", "Do tyłu", "Przeskakuje o 5 sekund do tyłu.", "Do przodu", "Przeskakuje o 5 sekund do przodu.", "Poprzednia klatka", "Cofa o jedną klatkę.", "Następna klatka", "Przesuwa o jedną klatkę do przodu.", "Przyspieszenie (przytrzymaj)", "Odtwarza szybciej, dopóki klawisz jest przytrzymany. Szybkość wybiera się w panelu.", "Klasyczny formularz: {a}. Zadanie z jednym pytaniem: {b}.", "Klasyczny formularz: {a}. Nieużywane w zadaniu z jednym pytaniem.", "Potwierdź / wyślij", "Potwierdza werdykt i przechodzi dalej. W klasycznym formularzu naciska się dwa razy: najpierw przygotowanie, potem wysłanie.", "Anuluj werdykt", "Naciska „Anuluj”, gdy werdykt czeka na potwierdzenie, lub cofa pierwsze naciśnięcie Enter.", "Ustawienia DemoScope", "Otwiera lub zamyka okno ustawień.", "Animacje", "Wybierz wygląd wskaźnika DemoScope. Podglądy odtwarzane są na żywo.", "Włącz animacje", "Szybkość", "Wolno", "Normalnie", "Szybko", "Styl", "Animacje są wyłączone. Podglądy nadal się odtwarzają, abyś mógł je porównać.", "Resetuj", "Puls", "Z kropki rozchodzi się pierścień.", "Oddech", "Miękka poświata, która narasta i gaśnie.", "Fale", "Dwie fale jedna po drugiej.", "Bicie serca", "Szybkie podwójne uderzenie, potem przerwa.", "Orbita", "Mała iskra krąży wokół kropki.", "Mruganie", "Proste płynne pojawianie się i zanikanie.", "Szybki werdykt {n}"],
+      "pt-BR": ["Atribua qualquer tecla. Você será avisado antes de uma tecla já em uso ser substituída.", "Personalizar atalhos", "Estilo, velocidade e chave liga/desliga do indicador do DemoScope, com pré-visualizações ao vivo.", "Configurações de animação", "Atalhos de teclado", "Clique em uma tecla para alterá-la e depois pressione a nova tecla. Se ela já estiver em uso, você verá onde antes de algo ser substituído.", "Alterar tecla: {action}", "Pressione uma tecla…", "Cancelar", "Restaurar padrão ({key})", "Restaurar tudo", "Clique novamente para restaurar tudo", "Fechar", "Não atribuída", "Esta tecla já está em uso", "{key} está atribuída a “{action}” ({group}). {desc}", "Substituir: “{other}” ficará sem tecla.", "Substituir: “{other}” ficará sem tecla. Trocar: “{other}” recebe {prev}.", "Substituir", "Trocar", "Esta tecla não pode ser usada: ela é reservada pelo navegador ou necessária para a navegação.", "Shift só pode ser usado para a ação de manter pressionado “Aceleração”.", "Todos os atalhos voltaram ao padrão.", "Sem alterações.", "“{key}” já é usada para “{action}”. Altere em Atalhos de teclado.", "Reprodução", "Navegação", "Veredictos", "Envio", "Interface", "Reproduzir / pausar", "Pausa o clipe ou retoma a reprodução.", "Som ligado / desligado", "Silencia ou reativa o som do clipe.", "Tela cheia", "Entra ou sai do modo de tela cheia.", "Voltar", "Volta 5 segundos.", "Avançar", "Avança 5 segundos.", "Quadro anterior", "Volta um quadro.", "Próximo quadro", "Avança um quadro.", "Aceleração (manter pressionado)", "Reproduz mais rápido enquanto a tecla estiver pressionada. A velocidade é escolhida no painel.", "Formulário clássico: {a}. Tarefa de uma pergunta: {b}.", "Formulário clássico: {a}. Não é usada na tarefa de uma pergunta.", "Confirmar / enviar", "Confirma o veredicto e avança. No formulário clássico, pressione duas vezes: primeiro preparar, depois enviar.", "Cancelar veredicto", "Pressiona “Cancelar” enquanto um veredicto aguarda confirmação, ou desfaz o primeiro toque em Enter.", "Configurações do DemoScope", "Abre ou fecha a janela de configurações.", "Animações", "Escolha a aparência do indicador do DemoScope. As pré-visualizações rodam ao vivo.", "Ativar animações", "Velocidade", "Lenta", "Normal", "Rápida", "Estilo", "As animações estão desativadas. As pré-visualizações continuam rodando para você comparar.", "Restaurar", "Pulso", "Um anel se expande a partir do ponto.", "Respiração", "Um brilho suave que cresce e se apaga.", "Ondas", "Duas ondas, uma após a outra.", "Batimento", "Uma batida dupla rápida, depois pausa.", "Órbita", "Uma pequena faísca gira em volta do ponto.", "Piscar", "Um simples esmaecer de entrada e saída.", "Veredicto rápido {n}"],
+      "pt-PT": ["Atribua qualquer tecla. Será avisado antes de uma tecla já em uso ser substituída.", "Personalizar atalhos", "Estilo, velocidade e interruptor de ligar/desligar do indicador do DemoScope, com pré-visualizações em direto.", "Definições de animação", "Atalhos de teclado", "Clique numa tecla para a alterar e depois prima a nova tecla. Se já estiver em uso, verá onde antes de algo ser substituído.", "Alterar tecla: {action}", "Prima uma tecla…", "Cancelar", "Repor predefinição ({key})", "Repor tudo", "Clique novamente para repor tudo", "Fechar", "Não atribuída", "Esta tecla já está em uso", "{key} está atribuída a «{action}» ({group}). {desc}", "Substituir: «{other}» ficará sem tecla.", "Substituir: «{other}» ficará sem tecla. Trocar: «{other}» recebe {prev}.", "Substituir", "Trocar", "Não é possível usar esta tecla: está reservada pelo navegador ou é necessária para a navegação.", "Shift só pode ser usado para a ação de manter premido «Aceleração».", "Todos os atalhos foram repostos para os valores predefinidos.", "Sem alterações.", "«{key}» já é usada para «{action}». Altere-a em Atalhos de teclado.", "Reprodução", "Navegação", "Veredictos", "Envio", "Interface", "Reproduzir / pausa", "Pausa o clipe ou retoma a reprodução.", "Som ligado / desligado", "Silencia ou reativa o som do clipe.", "Ecrã inteiro", "Entra ou sai do modo de ecrã inteiro.", "Recuar", "Salta 5 segundos para trás.", "Avançar", "Salta 5 segundos para a frente.", "Fotograma anterior", "Recua um fotograma.", "Fotograma seguinte", "Avança um fotograma.", "Aceleração (manter premido)", "Reproduz mais depressa enquanto a tecla estiver premida. A velocidade escolhe-se no painel.", "Formulário clássico: {a}. Tarefa de uma só pergunta: {b}.", "Formulário clássico: {a}. Não é usada na tarefa de uma só pergunta.", "Confirmar / enviar", "Confirma o veredicto e avança. No formulário clássico prime-se duas vezes: primeiro preparar, depois enviar.", "Cancelar veredicto", "Prime «Cancelar» enquanto um veredicto aguarda confirmação, ou anula o primeiro toque em Enter.", "Definições do DemoScope", "Abre ou fecha a janela de definições.", "Animações", "Escolha o aspeto do indicador do DemoScope. As pré-visualizações são reproduzidas em direto.", "Ativar animações", "Velocidade", "Lenta", "Normal", "Rápida", "Estilo", "As animações estão desativadas. As pré-visualizações continuam a ser reproduzidas para poder comparar.", "Repor", "Pulso", "Um anel expande-se a partir do ponto.", "Respiração", "Um brilho suave que cresce e se desvanece.", "Ondas", "Duas ondas, uma a seguir à outra.", "Batimento", "Uma batida dupla rápida, depois pausa.", "Órbita", "Uma pequena faísca circula à volta do ponto.", "Piscar", "Um simples desvanecer de entrada e saída.", "Veredicto rápido {n}"],
+      "ro": ["Atribuiți orice tastă. Veți fi avertizat înainte ca o tastă deja folosită să fie înlocuită.", "Personalizează comenzile rapide", "Stilul, viteza și comutatorul pornit/oprit pentru indicatorul DemoScope, cu previzualizări în direct.", "Setări de animație", "Comenzi rapide", "Faceți clic pe o tastă pentru a o schimba, apoi apăsați tasta nouă. Dacă este deja folosită, veți vedea unde, înainte să se înlocuiască ceva.", "Schimbă tasta: {action}", "Apăsați o tastă…", "Anulează", "Resetează la implicit ({key})", "Resetează tot", "Faceți clic din nou pentru a reseta tot", "Închide", "Neatribuită", "Această tastă este deja folosită", "{key} este atribuită pentru „{action}” ({group}). {desc}", "Înlocuiește: „{other}” va rămâne fără tastă.", "Înlocuiește: „{other}” va rămâne fără tastă. Schimbă între ele: „{other}” primește {prev}.", "Înlocuiește", "Schimbă între ele", "Această tastă nu poate fi folosită: este rezervată de browser sau necesară pentru navigare.", "Shift poate fi folosit doar pentru acțiunea cu tastă ținută „Accelerare”.", "Toate comenzile rapide au revenit la valorile implicite.", "Nicio modificare.", "„{key}” este deja folosită pentru „{action}”. Schimbați în Comenzi rapide.", "Redare", "Navigare", "Verdicte", "Trimitere", "Interfață", "Redare / pauză", "Pune clipul pe pauză sau reia redarea.", "Sunet pornit / oprit", "Oprește sau repornește sunetul clipului.", "Ecran complet", "Intră sau iese din modul ecran complet.", "Înapoi", "Sare 5 secunde înapoi.", "Înainte", "Sare 5 secunde înainte.", "Cadrul anterior", "Merge un cadru înapoi.", "Cadrul următor", "Merge un cadru înainte.", "Accelerare (ținută)", "Redă mai repede cât timp tasta este ținută apăsată. Viteza se alege în panou.", "Formular clasic: {a}. Sarcină cu o singură întrebare: {b}.", "Formular clasic: {a}. Nu se folosește în sarcina cu o singură întrebare.", "Confirmă / trimite", "Confirmă verdictul și merge mai departe. În formularul clasic se apasă de două ori: mai întâi pregătire, apoi trimitere.", "Anulează verdictul", "Apasă „Anulează” cât timp un verdict așteaptă confirmarea sau anulează prima apăsare pe Enter.", "Setări DemoScope", "Deschide sau închide fereastra de setări.", "Animații", "Alegeți cum arată indicatorul DemoScope. Previzualizările rulează în direct.", "Activează animațiile", "Viteză", "Lent", "Normal", "Rapid", "Stil", "Animațiile sunt dezactivate. Previzualizările rulează în continuare, ca să puteți compara.", "Resetează", "Puls", "Un inel se extinde din punct.", "Respirație", "O strălucire blândă care crește și se stinge.", "Valuri", "Două valuri, unul după altul.", "Bătaie de inimă", "O dublă bătaie rapidă, apoi pauză.", "Orbită", "O mică scânteie se rotește în jurul punctului.", "Clipire", "O simplă apariție și dispariție treptată.", "Verdict rapid {n}"],
+      "sv": ["Tilldela vilken tangent som helst. Du varnas innan en tangent som redan används ersätts.", "Anpassa kortkommandon", "Stil, hastighet och av/på-reglage för DemoScope-indikatorn, med liveförhandsvisning.", "Animationsinställningar", "Kortkommandon", "Klicka på en tangent för att ändra den och tryck sedan på den nya tangenten. Om den redan används ser du var innan något ersätts.", "Ändra tangent: {action}", "Tryck på en tangent …", "Avbryt", "Återställ till standard ({key})", "Återställ alla", "Klicka igen för att återställa alla", "Stäng", "Inte tilldelad", "Den här tangenten används redan", "{key} är tilldelad ”{action}” ({group}). {desc}", "Ersätt: ”{other}” blir utan tangent.", "Ersätt: ”{other}” blir utan tangent. Byt: ”{other}” får {prev}.", "Ersätt", "Byt", "Den här tangenten kan inte användas: den är reserverad av webbläsaren eller behövs för navigering.", "Shift kan bara användas för hållåtgärden ”Snabbare uppspelning”.", "Alla kortkommandon har återställts till standard.", "Ingen ändring.", "”{key}” används redan för ”{action}”. Ändra det under Kortkommandon.", "Uppspelning", "Navigering", "Bedömningar", "Inskickning", "Gränssnitt", "Spela / pausa", "Pausar klippet eller återupptar uppspelningen.", "Ljud på / av", "Stänger av eller slår på klippets ljud.", "Helskärm", "Går in i eller lämnar helskärmsläget.", "Spola tillbaka", "Hoppar 5 sekunder bakåt.", "Spola framåt", "Hoppar 5 sekunder framåt.", "Föregående bildruta", "Går en bildruta bakåt.", "Nästa bildruta", "Går en bildruta framåt.", "Snabbare uppspelning (håll)", "Spelar upp snabbare medan tangenten hålls nedtryckt. Hastigheten väljs i panelen.", "Klassiskt formulär: {a}. Uppgift med en fråga: {b}.", "Klassiskt formulär: {a}. Används inte i uppgiften med en fråga.", "Bekräfta / skicka", "Bekräftar bedömningen och går vidare. I det klassiska formuläret trycker du två gånger: först förbered, sedan skicka.", "Ångra bedömning", "Trycker på ”Avbryt” medan en bedömning väntar på bekräftelse, eller ångrar det första trycket på Enter.", "DemoScope-inställningar", "Öppnar eller stänger inställningsfönstret.", "Animationer", "Välj hur DemoScope-indikatorn ser ut. Förhandsvisningarna spelas upp live.", "Aktivera animationer", "Hastighet", "Långsam", "Normal", "Snabb", "Stil", "Animationer är avstängda. Förhandsvisningarna spelas ändå upp så att du kan jämföra.", "Återställ", "Puls", "En ring expanderar från pricken.", "Andning", "Ett mjukt sken som sväller och tonar bort.", "Vågor", "Två vågor efter varandra.", "Hjärtslag", "Ett snabbt dubbelslag, sedan paus.", "Omloppsbana", "En liten gnista cirklar runt pricken.", "Blinkning", "En enkel in- och uttoning.", "Snabb bedömning {n}"],
+      "th": ["กำหนดปุ่มใดก็ได้ ระบบจะเตือนก่อนที่จะแทนที่ปุ่มที่ถูกใช้งานอยู่แล้ว", "ปรับแต่งปุ่มลัด", "รูปแบบ ความเร็ว และสวิตช์เปิด/ปิดของตัวบ่งชี้ DemoScope พร้อมตัวอย่างแบบสด", "การตั้งค่าแอนิเมชัน", "ปุ่มลัด", "คลิกที่ปุ่มเพื่อเปลี่ยน แล้วกดปุ่มใหม่ หากปุ่มนั้นถูกใช้อยู่แล้ว คุณจะเห็นว่าใช้ที่ไหนก่อนที่จะมีการแทนที่", "เปลี่ยนปุ่ม: {action}", "กดปุ่มใดก็ได้…", "ยกเลิก", "รีเซ็ตเป็นค่าเริ่มต้น ({key})", "รีเซ็ตทั้งหมด", "คลิกอีกครั้งเพื่อรีเซ็ตทั้งหมด", "ปิด", "ยังไม่ได้กำหนด", "ปุ่มนี้ถูกใช้งานอยู่แล้ว", "{key} ถูกกำหนดให้ “{action}” ({group}) {desc}", "แทนที่: “{other}” จะไม่มีปุ่ม", "แทนที่: “{other}” จะไม่มีปุ่ม สลับ: “{other}” จะได้ {prev}", "แทนที่", "สลับ", "ไม่สามารถใช้ปุ่มนี้ได้: เบราว์เซอร์สงวนไว้หรือจำเป็นสำหรับการนำทาง", "Shift ใช้ได้เฉพาะการกระทำแบบกดค้าง “เร่งความเร็ว” เท่านั้น", "ปุ่มลัดทั้งหมดกลับเป็นค่าเริ่มต้นแล้ว", "ไม่มีการเปลี่ยนแปลง", "“{key}” ถูกใช้กับ “{action}” อยู่แล้ว โปรดเปลี่ยนที่ปุ่มลัด", "การเล่น", "การนำทาง", "คำตัดสิน", "การส่ง", "อินเทอร์เฟซ", "เล่น / หยุดชั่วคราว", "หยุดคลิปชั่วคราวหรือเล่นต่อ", "เปิด / ปิดเสียง", "ปิดหรือเปิดเสียงของคลิป", "เต็มหน้าจอ", "เข้าหรือออกจากโหมดเต็มหน้าจอ", "ย้อนกลับ", "ข้ามย้อนหลัง 5 วินาที", "ไปข้างหน้า", "ข้ามไปข้างหน้า 5 วินาที", "เฟรมก่อนหน้า", "ถอยหลังหนึ่งเฟรม", "เฟรมถัดไป", "เดินหน้าหนึ่งเฟรม", "เร่งความเร็ว (กดค้าง)", "เล่นเร็วขึ้นขณะกดปุ่มค้าง เลือกความเร็วได้ในแผง", "แบบฟอร์มคลาสสิก: {a} งานแบบคำถามเดียว: {b}", "แบบฟอร์มคลาสสิก: {a} ไม่ใช้ในงานแบบคำถามเดียว", "ยืนยัน / ส่ง", "ยืนยันคำตัดสินและไปต่อ ในแบบฟอร์มคลาสสิกต้องกดสองครั้ง: ครั้งแรกเตรียม แล้วจึงส่ง", "ยกเลิกคำตัดสิน", "กด “ยกเลิก” ขณะที่คำตัดสินรอการยืนยัน หรือยกเลิกการกด Enter ครั้งแรก", "การตั้งค่า DemoScope", "เปิดหรือปิดหน้าต่างการตั้งค่า", "แอนิเมชัน", "เลือกรูปลักษณ์ของตัวบ่งชี้ DemoScope ตัวอย่างจะเล่นแบบสด", "เปิดใช้แอนิเมชัน", "ความเร็ว", "ช้า", "ปกติ", "เร็ว", "รูปแบบ", "แอนิเมชันปิดอยู่ ตัวอย่างยังคงเล่นเพื่อให้คุณเปรียบเทียบได้", "รีเซ็ต", "พัลส์", "วงแหวนขยายออกจากจุด", "หายใจ", "แสงนุ่ม ๆ ที่สว่างขึ้นแล้วค่อย ๆ จางลง", "ระลอกคลื่น", "คลื่นสองระลอกต่อเนื่องกัน", "จังหวะหัวใจ", "เต้นสองครั้งรวดเร็ว แล้วหยุดพัก", "วงโคจร", "ประกายไฟเล็ก ๆ วนรอบจุด", "กะพริบ", "ค่อย ๆ ปรากฏและจางหายแบบเรียบง่าย", "คำตัดสินด่วน {n}"],
+      "tr": ["İstediğiniz tuşu atayın. Zaten kullanılan bir tuş değiştirilmeden önce uyarılırsınız.", "Kısayolları özelleştir", "DemoScope göstergesinin stili, hızı ve açma/kapama düğmesi, canlı önizlemelerle.", "Animasyon ayarları", "Kısayol tuşları", "Değiştirmek için bir tuşa tıklayın, ardından yeni tuşa basın. Tuş zaten kullanılıyorsa, bir şey değiştirilmeden önce nerede kullanıldığını görürsünüz.", "Tuşu değiştir: {action}", "Bir tuşa basın…", "İptal", "Varsayılana sıfırla ({key})", "Tümünü sıfırla", "Tümünü sıfırlamak için tekrar tıklayın", "Kapat", "Atanmadı", "Bu tuş zaten kullanılıyor", "{key} tuşu “{action}” ({group}) işlevine atanmış. {desc}", "Değiştir: “{other}” tuşsuz kalır.", "Değiştir: “{other}” tuşsuz kalır. Takas et: “{other}” {prev} tuşunu alır.", "Değiştir", "Takas et", "Bu tuş kullanılamaz: tarayıcı tarafından ayrılmış veya gezinme için gerekli.", "Shift yalnızca basılı tutma eylemi olan “Hızlandırma” için kullanılabilir.", "Tüm kısayollar varsayılana döndürüldü.", "Değişiklik yok.", "“{key}” zaten “{action}” için kullanılıyor. Bunu Kısayol tuşları bölümünden değiştirin.", "Oynatma", "Gezinme", "Kararlar", "Gönderim", "Arayüz", "Oynat / duraklat", "Klibi duraklatır veya oynatmayı sürdürür.", "Ses açık / kapalı", "Klibin sesini kapatır veya açar.", "Tam ekran", "Tam ekran moduna girer veya çıkar.", "Geri sar", "5 saniye geri atlar.", "İleri sar", "5 saniye ileri atlar.", "Önceki kare", "Bir kare geri gider.", "Sonraki kare", "Bir kare ileri gider.", "Hızlandırma (basılı tut)", "Tuş basılı tutulurken daha hızlı oynatır. Hız panelden seçilir.", "Klasik form: {a}. Tek soruluk görev: {b}.", "Klasik form: {a}. Tek soruluk görevde kullanılmaz.", "Onayla / gönder", "Kararı onaylar ve devam eder. Klasik formda iki kez basılır: önce hazırla, sonra gönder.", "Kararı iptal et", "Bir karar onay beklerken “İptal”e basar veya ilk Enter basışını geri alır.", "DemoScope ayarları", "Ayarlar penceresini açar veya kapatır.", "Animasyonlar", "DemoScope göstergesinin görünümünü seçin. Önizlemeler canlı oynatılır.", "Animasyonları etkinleştir", "Hız", "Yavaş", "Normal", "Hızlı", "Stil", "Animasyonlar kapalı. Karşılaştırabilmeniz için önizlemeler yine de oynatılır.", "Sıfırla", "Nabız", "Noktadan bir halka yayılır.", "Nefes", "Büyüyüp sönen yumuşak bir parıltı.", "Dalgalar", "Art arda iki dalga.", "Kalp atışı", "Hızlı çift atış, sonra duraklama.", "Yörünge", "Küçük bir kıvılcım noktanın etrafında döner.", "Yanıp sönme", "Basit bir belirip kaybolma.", "Hızlı karar {n}"],
+      "uk": ["Призначайте будь-яку клавішу. Вас попередять, перш ніж замінити клавішу, яка вже використовується.", "Налаштувати клавіші", "Стиль, швидкість і перемикач увімкнення індикатора DemoScope із живим попереднім переглядом.", "Налаштування анімації", "Гарячі клавіші", "Натисніть на клавішу, щоб змінити її, потім натисніть нову. Якщо вона вже зайнята, ви побачите, де саме, перш ніж щось замінюватиметься.", "Змінити клавішу: {action}", "Натисніть клавішу…", "Скасувати", "Скинути до типової ({key})", "Скинути все", "Натисніть ще раз, щоб скинути все", "Закрити", "Не призначено", "Ця клавіша вже зайнята", "{key} уже призначена для «{action}» ({group}). {desc}", "Замінити: у «{other}» не залишиться клавіші.", "Замінити: у «{other}» не залишиться клавіші. Поміняти місцями: «{other}» отримає {prev}.", "Замінити", "Поміняти", "Цю клавішу не можна використовувати: вона зарезервована браузером або потрібна для навігації.", "Shift можна використовувати лише для дії з утриманням «Прискорення».", "Усі клавіші повернуто до типових значень.", "Без змін.", "«{key}» уже використовується для «{action}». Змініть це в «Гарячих клавішах».", "Відтворення", "Навігація", "Вердикти", "Надсилання", "Інтерфейс", "Відтворення / пауза", "Ставить ролик на паузу або продовжує відтворення.", "Звук увімк. / вимк.", "Вимикає або вмикає звук ролика.", "Повноекранний режим", "Вмикає або вимикає повноекранний режим.", "Назад", "Перемотує на 5 секунд назад.", "Вперед", "Перемотує на 5 секунд уперед.", "Попередній кадр", "Крок на один кадр назад.", "Наступний кадр", "Крок на один кадр уперед.", "Прискорення (утримувати)", "Пришвидшує відтворення, поки клавішу утримують. Швидкість обирається на панелі.", "Класична форма: {a}. Завдання з одним питанням: {b}.", "Класична форма: {a}. У завданні з одним питанням не використовується.", "Підтвердити / надіслати", "Підтверджує вердикт і переходить далі. У класичній формі натискається двічі: спочатку підготовка, потім надсилання.", "Скасувати вердикт", "Натискає «Скасувати», поки вердикт чекає підтвердження, або скасовує перше натискання Enter.", "Налаштування DemoScope", "Відкриває або закриває вікно налаштувань.", "Анімації", "Оберіть вигляд індикатора DemoScope. Попередній перегляд відтворюється наживо.", "Увімкнути анімації", "Швидкість", "Повільно", "Звичайно", "Швидко", "Стиль", "Анімації вимкнено. Попередній перегляд усе одно відтворюється, щоб можна було порівняти.", "Скинути", "Пульс", "Від точки розходиться кільце.", "Дихання", "М’яке сяйво, що наростає і згасає.", "Хвилі", "Дві хвилі одна за одною.", "Серцебиття", "Швидкий подвійний удар і пауза.", "Орбіта", "Маленька іскра кружляє навколо точки.", "Блимання", "Просте плавне згасання і повернення.", "Швидкий вердикт {n}"],
+      "vi": ["Gán bất kỳ phím nào. Bạn sẽ được cảnh báo trước khi một phím đang được dùng bị thay thế.", "Tùy chỉnh phím tắt", "Kiểu, tốc độ và công tắc bật/tắt của chỉ báo DemoScope, kèm bản xem trước trực tiếp.", "Cài đặt hoạt ảnh", "Phím tắt", "Nhấp vào một phím để đổi, rồi nhấn phím mới. Nếu phím đã được dùng, bạn sẽ thấy nó ở đâu trước khi có gì bị thay thế.", "Đổi phím: {action}", "Nhấn một phím…", "Hủy", "Đặt lại mặc định ({key})", "Đặt lại tất cả", "Nhấp lần nữa để đặt lại tất cả", "Đóng", "Chưa gán", "Phím này đã được sử dụng", "{key} đã được gán cho “{action}” ({group}). {desc}", "Thay thế: “{other}” sẽ không còn phím.", "Thay thế: “{other}” sẽ không còn phím. Hoán đổi: “{other}” nhận {prev}.", "Thay thế", "Hoán đổi", "Không thể dùng phím này: trình duyệt đã dành riêng hoặc cần cho việc điều hướng.", "Shift chỉ có thể dùng cho thao tác giữ phím “Tăng tốc”.", "Tất cả phím tắt đã trở về mặc định.", "Không có thay đổi.", "“{key}” đã được dùng cho “{action}”. Hãy đổi trong Phím tắt.", "Phát", "Điều hướng", "Kết luận", "Gửi", "Giao diện", "Phát / tạm dừng", "Tạm dừng clip hoặc tiếp tục phát.", "Bật / tắt âm thanh", "Tắt hoặc bật tiếng của clip.", "Toàn màn hình", "Vào hoặc thoát chế độ toàn màn hình.", "Tua lại", "Nhảy lùi 5 giây.", "Tua tới", "Nhảy tới 5 giây.", "Khung hình trước", "Lùi một khung hình.", "Khung hình sau", "Tiến một khung hình.", "Tăng tốc (giữ phím)", "Phát nhanh hơn khi đang giữ phím. Tốc độ được chọn trong bảng điều khiển.", "Biểu mẫu cổ điển: {a}. Nhiệm vụ một câu hỏi: {b}.", "Biểu mẫu cổ điển: {a}. Không dùng trong nhiệm vụ một câu hỏi.", "Xác nhận / gửi", "Xác nhận kết luận và tiếp tục. Ở biểu mẫu cổ điển, nhấn hai lần: lần đầu chuẩn bị, lần sau gửi.", "Hủy kết luận", "Nhấn “Hủy” khi kết luận đang chờ xác nhận, hoặc hoàn tác lần nhấn Enter đầu tiên.", "Cài đặt DemoScope", "Mở hoặc đóng cửa sổ cài đặt.", "Hoạt ảnh", "Chọn giao diện của chỉ báo DemoScope. Bản xem trước được phát trực tiếp.", "Bật hoạt ảnh", "Tốc độ", "Chậm", "Bình thường", "Nhanh", "Kiểu", "Hoạt ảnh đang tắt. Bản xem trước vẫn phát để bạn so sánh.", "Đặt lại", "Xung nhịp", "Một vòng tròn lan ra từ chấm.", "Hít thở", "Ánh sáng dịu sáng lên rồi mờ dần.", "Gợn sóng", "Hai gợn sóng nối tiếp nhau.", "Nhịp tim", "Hai nhịp nhanh, rồi nghỉ.", "Quỹ đạo", "Một tia lửa nhỏ quay quanh chấm.", "Nhấp nháy", "Hiện dần và mờ dần đơn giản.", "Kết luận nhanh {n}"],
+      "zh-CN": ["可重新分配任意按键。若按键已被占用，替换前会先提醒您。", "自定义快捷键", "DemoScope 指示灯的样式、速度和开关，并提供实时预览。", "动画设置", "快捷键", "点击按键进行修改，然后按下新的按键。如果该按键已被占用，在替换前您会看到它的用途。", "更改按键：{action}", "请按下一个键…", "取消", "恢复默认（{key}）", "全部重置", "再次点击以全部重置", "关闭", "未设置", "该按键已被占用", "{key} 已分配给“{action}”（{group}）。{desc}", "替换：“{other}”将没有按键。", "替换：“{other}”将没有按键。交换：“{other}”将使用 {prev}。", "替换", "交换", "无法使用该按键：它被浏览器保留或用于导航。", "Shift 只能用于按住类操作“加速播放”。", "所有快捷键已恢复默认。", "未更改。", "“{key}”已用于“{action}”。请在“快捷键”中修改。", "播放", "导航", "结论", "提交", "界面", "播放 / 暂停", "暂停视频或继续播放。", "声音开 / 关", "静音或取消静音。", "全屏", "进入或退出全屏模式。", "后退", "后退 5 秒。", "前进", "前进 5 秒。", "上一帧", "后退一帧。", "下一帧", "前进一帧。", "加速（按住）", "按住按键时加速播放，速度在面板中选择。", "经典表单：{a}。单问题任务：{b}。", "经典表单：{a}。单问题任务中不使用。", "确认 / 提交", "确认结论并继续。在经典表单中需按两次：先准备，再发送。", "取消结论", "在结论等待确认时按下“取消”，或撤销第一次 Enter。", "DemoScope 设置", "打开或关闭设置窗口。", "动画", "选择 DemoScope 指示灯的外观，预览为实时播放。", "启用动画", "速度", "慢", "正常", "快", "样式", "动画已关闭。预览仍会播放，方便您比较。", "重置", "脉冲", "圆环从圆点向外扩散。", "呼吸", "柔和的光晕渐强渐弱。", "涟漪", "两道涟漪依次扩散。", "心跳", "快速双跳动后停顿。", "轨道", "一颗小火花绕着圆点旋转。", "闪烁", "简单的淡入淡出。", "快速结论 {n}"],
+      "zh-TW": ["可重新指派任意按鍵。若按鍵已被占用，取代前會先提醒您。", "自訂快捷鍵", "DemoScope 指示燈的樣式、速度與開關，並提供即時預覽。", "動畫設定", "快捷鍵", "點擊按鍵進行修改，然後按下新的按鍵。若該按鍵已被占用，在取代前您會看到它的用途。", "變更按鍵：{action}", "請按下一個鍵…", "取消", "還原預設（{key}）", "全部重設", "再次點擊以全部重設", "關閉", "未設定", "此按鍵已被占用", "{key} 已指派給「{action}」（{group}）。{desc}", "取代：「{other}」將沒有按鍵。", "取代：「{other}」將沒有按鍵。交換：「{other}」將改用 {prev}。", "取代", "交換", "無法使用此按鍵：它由瀏覽器保留或用於導覽。", "Shift 只能用於按住類操作「加速播放」。", "所有快捷鍵已還原為預設值。", "未變更。", "「{key}」已用於「{action}」。請在「快捷鍵」中修改。", "播放", "導覽", "判定", "送出", "介面", "播放 / 暫停", "暫停影片或繼續播放。", "聲音開 / 關", "靜音或取消靜音。", "全螢幕", "進入或離開全螢幕模式。", "倒退", "倒退 5 秒。", "快轉", "快轉 5 秒。", "上一影格", "倒退一個影格。", "下一影格", "前進一個影格。", "加速（按住）", "按住按鍵時加速播放，速度在面板中選擇。", "經典表單：{a}。單一問題任務：{b}。", "經典表單：{a}。單一問題任務中不使用。", "確認 / 送出", "確認判定並繼續。在經典表單中需按兩次：先準備，再送出。", "取消判定", "在判定等待確認時按下「取消」，或撤銷第一次 Enter。", "DemoScope 設定", "開啟或關閉設定視窗。", "動畫", "選擇 DemoScope 指示燈的外觀，預覽為即時播放。", "啟用動畫", "速度", "慢", "正常", "快", "樣式", "動畫已關閉。預覽仍會播放，方便您比較。", "重設", "脈衝", "圓環從圓點向外擴散。", "呼吸", "柔和的光暈漸強漸弱。", "漣漪", "兩道漣漪依序擴散。", "心跳", "快速雙跳動後停頓。", "軌道", "一顆小火花繞著圓點旋轉。", "閃爍", "簡單的淡入淡出。", "快速判定 {n}"],
+    };
+    for (const [locale, values] of Object.entries(EXTRA_TRANSLATIONS)) {
+      const index = LOCALE_INDEX.indexOf(locale);
+      if (index < 0) continue;
+      EXTRA_KEYS.forEach((key, position) => {
+        const text = values[position];
+        if (!text) return;
+        if (key === "hkName_quickN") {
+          for (let n = 1; n <= 5; n += 1) {
+            if (SETTINGS_TEXT_ROWS[`hkName_quick${n}`]) SETTINGS_TEXT_ROWS[`hkName_quick${n}`][index] = text.replace("{n}", String(n));
+          }
+        } else if (SETTINGS_TEXT_ROWS[key]) {
+          SETTINGS_TEXT_ROWS[key][index] = text;
+        }
+      });
+    }
+
+    add("cheatUnsure", "Not sure", "Не уверен(а)");
+    add("hkSummaryDefault", "Defaults", "По умолчанию");
+    add("hkSummaryChanged", "Changed: {n}", "Изменено: {n}");
+    add("anSummaryOff", "Off", "Выключено");
+    add("resetSectionTitle", "Reset", "Сброс");
+    add("resetSectionNote", "Restores sound, hotkeys and animations to their defaults. Your clip history is kept.", "Возвращает звук, горячие клавиши и анимации к значениям по умолчанию. История клипов сохраняется.");
+    add("settingsResetConfirmAll", "Reset sound, volume, hotkeys and animations to their defaults?", "Вернуть звуки, громкость, горячие клавиши и анимации к значениям по умолчанию?");
+    add("hkGroup_invite", "Invite page", "Страница приглашения");
+    add("hkName_inviteDone", "Done", "Готово");
+    add("hkDesc_inviteDone", "Leaves the invite page and returns to the clips.", "Выходит со страницы приглашения и возвращает к роликам.");
+    add("hkName_inviteClose", "Close (×)", "Закрыть (×)");
+    add("hkDesc_inviteClose", "Same as the × button: returns to the clips.", "То же, что кнопка ×: возвращает к роликам.");
+    const NEW_KEYS = ["cheatUnsure", "hkSummaryDefault", "hkSummaryChanged", "anSummaryOff", "resetSectionTitle", "resetSectionNote", "settingsResetConfirmAll", "hkGroup_invite", "hkName_inviteDone", "hkDesc_inviteDone", "hkName_inviteClose", "hkDesc_inviteClose"];
+    const NEW_TRANSLATIONS = {
+      "bg": ["Не съм сигурен(а)", "По подразбиране", "Променени: {n}", "Изключено", "Нулиране", "Връща звука, бързите клавиши и анимациите към стойностите по подразбиране. Историята на клиповете се запазва.", "Да се върнат ли звуците, силата на звука, бързите клавиши и анимациите към стойностите по подразбиране?", "Страница за покани", "Готово", "Напуска страницата за покани и се връща към клиповете.", "Затваряне (×)", "Същото като бутона ×: връща към клиповете."],
+      "zh-CN": ["不确定", "默认", "已更改：{n}", "已关闭", "重置", "将声音、快捷键和动画恢复为默认值。剪辑历史会保留。", "要将声音、音量、快捷键和动画恢复为默认值吗？", "邀请页面", "完成", "离开邀请页面并返回剪辑。", "关闭（×）", "与 × 按钮相同：返回剪辑。"],
+      "zh-TW": ["不確定", "預設", "已變更：{n}", "已關閉", "重設", "將聲音、快捷鍵與動畫還原為預設值。剪輯記錄會保留。", "要將聲音、音量、快捷鍵與動畫還原為預設值嗎？", "邀請頁面", "完成", "離開邀請頁面並返回剪輯。", "關閉（×）", "與 × 按鈕相同：返回剪輯。"],
+      "cs": ["Nejsem si jistý(á)", "Výchozí", "Změněno: {n}", "Vypnuto", "Obnovení", "Vrátí zvuk, klávesové zkratky a animace na výchozí hodnoty. Historie klipů zůstane zachována.", "Vrátit zvuky, hlasitost, klávesové zkratky a animace na výchozí hodnoty?", "Stránka pozvánek", "Hotovo", "Opustí stránku pozvánek a vrátí se ke klipům.", "Zavřít (×)", "Totéž jako tlačítko ×: vrátí se ke klipům."],
+      "da": ["Usikker", "Standard", "Ændret: {n}", "Fra", "Nulstilling", "Gendanner lyd, genvejstaster og animationer til standard. Din klip-historik bevares.", "Nulstille lyde, lydstyrke, genvejstaster og animationer til standard?", "Invitationsside", "Færdig", "Forlader invitationssiden og vender tilbage til klippene.", "Luk (×)", "Samme som ×-knappen: vender tilbage til klippene."],
+      "nl": ["Niet zeker", "Standaard", "Gewijzigd: {n}", "Uit", "Herstellen", "Zet geluid, sneltoetsen en animaties terug naar de standaardwaarden. Uw cliphistorie blijft behouden.", "Geluiden, volume, sneltoetsen en animaties terugzetten naar de standaardwaarden?", "Uitnodigingspagina", "Klaar", "Verlaat de uitnodigingspagina en keert terug naar de clips.", "Sluiten (×)", "Hetzelfde als de ×-knop: keert terug naar de clips."],
+      "fi": ["En ole varma", "Oletus", "Muutettu: {n}", "Pois", "Palautus", "Palauttaa äänen, pikanäppäimet ja animaatiot oletusarvoihin. Klippihistoria säilyy.", "Palautetaanko äänet, äänenvoimakkuus, pikanäppäimet ja animaatiot oletusarvoihin?", "Kutsusivu", "Valmis", "Poistuu kutsusivulta ja palaa klippeihin.", "Sulje (×)", "Sama kuin ×-painike: palaa klippeihin."],
+      "fr": ["Pas sûr(e)", "Par défaut", "Modifiés : {n}", "Désactivées", "Réinitialisation", "Rétablit le son, les raccourcis et les animations par défaut. Votre historique de clips est conservé.", "Rétablir par défaut les sons, le volume, les raccourcis et les animations ?", "Page d’invitation", "Terminé", "Quitte la page d’invitation et revient aux clips.", "Fermer (×)", "Identique au bouton × : revient aux clips."],
+      "de": ["Nicht sicher", "Standard", "Geändert: {n}", "Aus", "Zurücksetzen", "Stellt Ton, Tastenkürzel und Animationen auf die Standardwerte zurück. Ihr Clip-Verlauf bleibt erhalten.", "Töne, Lautstärke, Tastenkürzel und Animationen auf die Standardwerte zurücksetzen?", "Einladungsseite", "Fertig", "Verlässt die Einladungsseite und kehrt zu den Clips zurück.", "Schließen (×)", "Wie die ×-Schaltfläche: kehrt zu den Clips zurück."],
+      "el": ["Δεν είμαι σίγουρος/η", "Προεπιλογές", "Άλλαξαν: {n}", "Ανενεργό", "Επαναφορά", "Επαναφέρει τον ήχο, τις συντομεύσεις και τα animations στις προεπιλογές. Το ιστορικό κλιπ διατηρείται.", "Να επανέλθουν οι ήχοι, η ένταση, οι συντομεύσεις και τα animations στις προεπιλογές;", "Σελίδα προσκλήσεων", "Τέλος", "Αποχωρεί από τη σελίδα προσκλήσεων και επιστρέφει στα κλιπ.", "Κλείσιμο (×)", "Το ίδιο με το κουμπί ×: επιστρέφει στα κλιπ."],
+      "hu": ["Nem vagyok biztos benne", "Alapértelmezett", "Módosítva: {n}", "Ki", "Visszaállítás", "Visszaállítja a hangot, a gyorsbillentyűket és az animációkat az alapértelmezettre. A klipelőzmények megmaradnak.", "Visszaállítja a hangokat, a hangerőt, a gyorsbillentyűket és az animációkat az alapértelmezettre?", "Meghívó oldal", "Kész", "Elhagyja a meghívó oldalt, és visszatér a klipekhez.", "Bezárás (×)", "Ugyanaz, mint a × gomb: visszatér a klipekhez."],
+      "id": ["Tidak yakin", "Default", "Diubah: {n}", "Mati", "Atur ulang", "Mengembalikan suara, pintasan, dan animasi ke default. Riwayat klip Anda tetap tersimpan.", "Atur ulang suara, volume, pintasan, dan animasi ke default?", "Halaman undangan", "Selesai", "Keluar dari halaman undangan dan kembali ke klip.", "Tutup (×)", "Sama seperti tombol ×: kembali ke klip."],
+      "it": ["Non sono sicuro/a", "Predefinite", "Modificate: {n}", "Disattivate", "Ripristino", "Riporta suono, scorciatoie e animazioni ai valori predefiniti. La cronologia delle clip viene mantenuta.", "Ripristinare suoni, volume, scorciatoie e animazioni ai valori predefiniti?", "Pagina inviti", "Fine", "Esce dalla pagina inviti e torna alle clip.", "Chiudi (×)", "Come il pulsante ×: torna alle clip."],
+      "ja": ["確信が持てない", "初期設定", "変更済み：{n}", "オフ", "リセット", "サウンド・ショートカット・アニメーションを初期設定に戻します。クリップ履歴は保持されます。", "サウンド、音量、ショートカット、アニメーションを初期設定に戻しますか？", "招待ページ", "完了", "招待ページを離れてクリップに戻ります。", "閉じる（×）", "× ボタンと同じ動作：クリップに戻ります。"],
+      "ko": ["확실하지 않음", "기본값", "변경됨: {n}", "꺼짐", "초기화", "소리, 단축키, 애니메이션을 기본값으로 되돌립니다. 클립 기록은 유지됩니다.", "소리, 볼륨, 단축키, 애니메이션을 기본값으로 되돌리시겠습니까?", "초대 페이지", "완료", "초대 페이지를 나가 클립으로 돌아갑니다.", "닫기 (×)", "× 버튼과 같습니다: 클립으로 돌아갑니다."],
+      "no": ["Usikker", "Standard", "Endret: {n}", "Av", "Tilbakestilling", "Gjenoppretter lyd, hurtigtaster og animasjoner til standard. Klipphistorikken beholdes.", "Tilbakestille lyder, volum, hurtigtaster og animasjoner til standard?", "Invitasjonsside", "Ferdig", "Forlater invitasjonssiden og går tilbake til klippene.", "Lukk (×)", "Samme som ×-knappen: går tilbake til klippene."],
+      "pl": ["Nie jestem pewien/pewna", "Domyślne", "Zmieniono: {n}", "Wyłączone", "Resetowanie", "Przywraca dźwięk, skróty klawiszowe i animacje do ustawień domyślnych. Historia klipów zostaje zachowana.", "Przywrócić dźwięki, głośność, skróty klawiszowe i animacje do ustawień domyślnych?", "Strona zaproszeń", "Gotowe", "Opuszcza stronę zaproszeń i wraca do klipów.", "Zamknij (×)", "To samo co przycisk ×: wraca do klipów."],
+      "pt-PT": ["Não tenho a certeza", "Predefinições", "Alterados: {n}", "Desativadas", "Repor", "Repõe o som, os atalhos e as animações para os valores predefinidos. O histórico de clipes é mantido.", "Repor os sons, o volume, os atalhos e as animações para os valores predefinidos?", "Página de convites", "Concluído", "Sai da página de convites e volta aos clipes.", "Fechar (×)", "O mesmo que o botão ×: volta aos clipes."],
+      "pt-BR": ["Não tenho certeza", "Padrão", "Alterados: {n}", "Desativadas", "Restaurar", "Restaura o som, os atalhos e as animações para o padrão. O histórico de clipes é mantido.", "Restaurar sons, volume, atalhos e animações para o padrão?", "Página de convites", "Concluído", "Sai da página de convites e volta aos clipes.", "Fechar (×)", "O mesmo que o botão ×: volta aos clipes."],
+      "ro": ["Nu sunt sigur(ă)", "Implicit", "Modificate: {n}", "Dezactivate", "Resetare", "Readuce sunetul, comenzile rapide și animațiile la valorile implicite. Istoricul clipurilor este păstrat.", "Resetați sunetele, volumul, comenzile rapide și animațiile la valorile implicite?", "Pagina de invitații", "Gata", "Părăsește pagina de invitații și revine la clipuri.", "Închide (×)", "La fel ca butonul ×: revine la clipuri."],
+      "es-ES": ["No estoy seguro/a", "Predeterminados", "Cambiados: {n}", "Desactivadas", "Restablecer", "Restablece el sonido, los atajos y las animaciones a sus valores predeterminados. Se conserva tu historial de clips.", "¿Restablecer los sonidos, el volumen, los atajos y las animaciones a sus valores predeterminados?", "Página de invitaciones", "Hecho", "Sale de la página de invitaciones y vuelve a los clips.", "Cerrar (×)", "Igual que el botón ×: vuelve a los clips."],
+      "es-419": ["No estoy seguro/a", "Predeterminados", "Cambiados: {n}", "Desactivadas", "Restablecer", "Restablece el sonido, los atajos y las animaciones a sus valores predeterminados. Se conserva tu historial de clips.", "¿Restablecer los sonidos, el volumen, los atajos y las animaciones a sus valores predeterminados?", "Página de invitaciones", "Listo", "Sale de la página de invitaciones y vuelve a los clips.", "Cerrar (×)", "Igual que el botón ×: vuelve a los clips."],
+      "sv": ["Osäker", "Standard", "Ändrade: {n}", "Av", "Återställning", "Återställer ljud, kortkommandon och animationer till standard. Din klipphistorik behålls.", "Återställa ljud, volym, kortkommandon och animationer till standard?", "Inbjudningssida", "Klar", "Lämnar inbjudningssidan och återgår till klippen.", "Stäng (×)", "Samma som ×-knappen: återgår till klippen."],
+      "th": ["ไม่แน่ใจ", "ค่าเริ่มต้น", "เปลี่ยนแล้ว: {n}", "ปิด", "รีเซ็ต", "คืนค่าเสียง ปุ่มลัด และแอนิเมชันเป็นค่าเริ่มต้น ประวัติคลิปจะยังคงอยู่", "รีเซ็ตเสียง ระดับเสียง ปุ่มลัด และแอนิเมชันเป็นค่าเริ่มต้นหรือไม่?", "หน้าเชิญ", "เสร็จสิ้น", "ออกจากหน้าเชิญและกลับไปที่คลิป", "ปิด (×)", "เหมือนปุ่ม ×: กลับไปที่คลิป"],
+      "tr": ["Emin değilim", "Varsayılan", "Değiştirilen: {n}", "Kapalı", "Sıfırlama", "Sesi, kısayol tuşlarını ve animasyonları varsayılana döndürür. Klip geçmişiniz korunur.", "Sesler, ses düzeyi, kısayol tuşları ve animasyonlar varsayılana döndürülsün mü?", "Davet sayfası", "Tamam", "Davet sayfasından çıkar ve kliplere döner.", "Kapat (×)", "× düğmesiyle aynı: kliplere döner."],
+      "uk": ["Не впевнений(а)", "Типові", "Змінено: {n}", "Вимкнено", "Скидання", "Повертає звук, гарячі клавіші та анімації до типових значень. Історія роликів зберігається.", "Повернути звуки, гучність, гарячі клавіші та анімації до типових значень?", "Сторінка запрошень", "Готово", "Виходить зі сторінки запрошень і повертає до роликів.", "Закрити (×)", "Те саме, що кнопка ×: повертає до роликів."],
+      "vi": ["Không chắc chắn", "Mặc định", "Đã đổi: {n}", "Tắt", "Đặt lại", "Đưa âm thanh, phím tắt và hoạt ảnh về mặc định. Lịch sử clip được giữ lại.", "Đặt lại âm thanh, âm lượng, phím tắt và hoạt ảnh về mặc định?", "Trang lời mời", "Xong", "Rời trang lời mời và quay lại các clip.", "Đóng (×)", "Giống nút ×: quay lại các clip."],
+    };
+    for (const [locale, values] of Object.entries(NEW_TRANSLATIONS)) {
+      const index = LOCALE_INDEX.indexOf(locale);
+      if (index < 0) continue;
+      NEW_KEYS.forEach((key, position) => {
+        if (values[position] && SETTINGS_TEXT_ROWS[key]) SETTINGS_TEXT_ROWS[key][index] = values[position];
+      });
+    }
+
+    add("diagTitle", "Diagnostics", "Диагностика");
+    add("diagNote", "If the page changes and something stops working, copy this report and send it to the developer. It contains no page text, account name or history: only technical details about the page and your browser.", "Если страница изменится и что-то перестанет работать, скопируйте этот отчёт и отправьте разработчику. В нём нет текста страницы, имени аккаунта и истории: только технические сведения о странице и браузере.");
+    add("diagButton", "Copy diagnostics", "Скопировать диагностику");
+    add("diagCopied", "Copied: {n} lines. Paste it into your bug report.", "Скопировано: {n} строк. Вставьте в отчёт об ошибке.");
+    add("diagFailed", "Could not copy automatically. Select the text below and copy it.", "Не удалось скопировать автоматически. Выделите текст ниже и скопируйте его.");
+    add("dsDisabledNotice", "The Valve page changed, so DemoScope is switched off here. Open the settings and copy the diagnostics.", "Страница Valve изменилась, поэтому DemoScope на ней отключён. Откройте настройки и скопируйте диагностику.");
+    add("diagReportButton", "Report on GitHub", "Сообщить на GitHub");
+    add("diagReportNote", "Opens the public GitHub issues page in a new tab. Nothing is sent for you: you paste the report there yourself.", "Открывает публичную страницу обращений на GitHub в новой вкладке. Ничего не отправляется за вас: отчёт вы вставляете там сами.");
+    const DIAG_KEYS = ["diagTitle", "diagNote", "diagButton", "diagCopied", "diagFailed", "dsDisabledNotice", "diagReportButton", "diagReportNote"];
+    const DIAG_TRANSLATIONS = {
+      "bg": ["Диагностика", "Ако страницата се промени и нещо спре да работи, копирайте този отчет и го изпратете на разработчика. Не съдържа текст на страницата, име на акаунт или история: само технически данни за страницата и браузъра.", "Копирай диагностиката", "Копирано: {n} реда. Поставете го в отчета си за грешка.", "Не успях да копирам автоматично. Маркирайте текста по-долу и го копирайте.", "Страницата на Valve се е променила, затова DemoScope е изключен тук. Отворете настройките и копирайте диагностиката.", "Докладвай в GitHub", "Отваря публичната страница с проблеми в GitHub в нов раздел. Нищо не се изпраща вместо вас: поставяте отчета там сами."],
+      "zh-CN": ["诊断", "如果页面改版导致功能失效，请复制此报告并发送给开发者。报告不含页面文字、账号名或历史记录，只有关于页面和浏览器的技术信息。", "复制诊断信息", "已复制：{n} 行。请粘贴到您的问题报告中。", "无法自动复制。请选中下方文字后手动复制。", "Valve 页面已发生变化，因此 DemoScope 在此页面已停用。请打开设置并复制诊断信息。", "在 GitHub 上反馈", "在新标签页中打开 GitHub 公开的 Issues 页面。不会替您发送任何内容：请自行把报告粘贴到那里。"],
+      "zh-TW": ["診斷", "如果頁面改版導致功能失效，請複製此報告並傳送給開發者。報告不含頁面文字、帳號名稱或歷史記錄，只有關於頁面和瀏覽器的技術資訊。", "複製診斷資訊", "已複製：{n} 行。請貼到您的問題回報中。", "無法自動複製。請選取下方文字後手動複製。", "Valve 頁面已變更，因此 DemoScope 在此頁面已停用。請開啟設定並複製診斷資訊。", "在 GitHub 上回報", "在新分頁中開啟 GitHub 公開的 Issues 頁面。不會替您傳送任何內容：請自行把報告貼到那裡。"],
+      "cs": ["Diagnostika", "Pokud se stránka změní a něco přestane fungovat, zkopírujte tuto zprávu a pošlete ji vývojáři. Neobsahuje text stránky, jméno účtu ani historii: jen technické údaje o stránce a prohlížeči.", "Kopírovat diagnostiku", "Zkopírováno: {n} řádků. Vložte to do hlášení o chybě.", "Automatické kopírování se nepovedlo. Označte text níže a zkopírujte ho.", "Stránka Valve se změnila, proto je DemoScope zde vypnut. Otevřete nastavení a zkopírujte diagnostiku.", "Nahlásit na GitHubu", "Otevře veřejnou stránku problémů na GitHubu v nové záložce. Nic se neodesílá za vás: zprávu tam vložíte sami."],
+      "da": ["Diagnostik", "Hvis siden ændrer sig, og noget holder op med at virke, kan du kopiere denne rapport og sende den til udvikleren. Den indeholder ingen sidetekst, kontonavn eller historik: kun tekniske oplysninger om siden og din browser.", "Kopiér diagnostik", "Kopieret: {n} linjer. Indsæt det i din fejlrapport.", "Kunne ikke kopiere automatisk. Markér teksten nedenfor og kopiér den.", "Valves side har ændret sig, så DemoScope er slået fra her. Åbn indstillingerne og kopiér diagnostikken.", "Rapportér på GitHub", "Åbner GitHubs offentlige side for fejl i et nyt faneblad. Intet sendes for dig: du indsætter selv rapporten der."],
+      "nl": ["Diagnostiek", "Als de pagina verandert en iets niet meer werkt, kopieer dan dit rapport en stuur het naar de ontwikkelaar. Het bevat geen paginatekst, accountnaam of geschiedenis: alleen technische gegevens over de pagina en uw browser.", "Diagnostiek kopiëren", "Gekopieerd: {n} regels. Plak het in uw foutmelding.", "Automatisch kopiëren is mislukt. Selecteer de tekst hieronder en kopieer die.", "De pagina van Valve is veranderd, daarom is DemoScope hier uitgeschakeld. Open de instellingen en kopieer de diagnostiek.", "Melden op GitHub", "Opent de openbare GitHub-pagina met issues in een nieuw tabblad. Er wordt niets voor u verzonden: u plakt het rapport daar zelf."],
+      "fi": ["Diagnostiikka", "Jos sivu muuttuu ja jokin lakkaa toimimasta, kopioi tämä raportti ja lähetä se kehittäjälle. Se ei sisällä sivun tekstiä, tilin nimeä eikä historiaa: vain teknisiä tietoja sivusta ja selaimestasi.", "Kopioi diagnostiikka", "Kopioitu: {n} riviä. Liitä se virheilmoitukseesi.", "Automaattinen kopiointi epäonnistui. Valitse alla oleva teksti ja kopioi se.", "Valven sivu on muuttunut, joten DemoScope on pois käytöstä tällä sivulla. Avaa asetukset ja kopioi diagnostiikka.", "Ilmoita GitHubissa", "Avaa GitHubin julkisen ongelmasivun uudessa välilehdessä. Mitään ei lähetetä puolestasi: liität raportin sinne itse."],
+      "fr": ["Diagnostic", "Si la page change et que quelque chose cesse de fonctionner, copiez ce rapport et envoyez-le au développeur. Il ne contient ni texte de la page, ni nom de compte, ni historique : uniquement des informations techniques sur la page et votre navigateur.", "Copier le diagnostic", "Copié : {n} lignes. Collez-le dans votre rapport de bug.", "Copie automatique impossible. Sélectionnez le texte ci-dessous et copiez-le.", "La page de Valve a changé : DemoScope est donc désactivé ici. Ouvrez les paramètres et copiez le diagnostic.", "Signaler sur GitHub", "Ouvre la page publique des tickets de GitHub dans un nouvel onglet. Rien n’est envoyé à votre place : vous collez le rapport vous-même."],
+      "de": ["Diagnose", "Wenn sich die Seite ändert und etwas nicht mehr funktioniert, kopieren Sie diesen Bericht und senden Sie ihn an den Entwickler. Er enthält weder Seitentext noch Kontonamen oder Verlauf: nur technische Angaben zur Seite und zu Ihrem Browser.", "Diagnose kopieren", "Kopiert: {n} Zeilen. Fügen Sie sie in Ihre Fehlermeldung ein.", "Automatisches Kopieren fehlgeschlagen. Markieren Sie den Text unten und kopieren Sie ihn.", "Die Valve-Seite hat sich geändert, deshalb ist DemoScope hier deaktiviert. Öffnen Sie die Einstellungen und kopieren Sie die Diagnose.", "Auf GitHub melden", "Öffnet die öffentliche GitHub-Seite für Issues in einem neuen Tab. Es wird nichts für Sie gesendet: Sie fügen den Bericht dort selbst ein."],
+      "el": ["Διάγνωση", "Αν αλλάξει η σελίδα και κάτι σταματήσει να λειτουργεί, αντιγράψτε αυτήν την αναφορά και στείλτε την στον προγραμματιστή. Δεν περιέχει κείμενο της σελίδας, όνομα λογαριασμού ή ιστορικό: μόνο τεχνικές πληροφορίες για τη σελίδα και το πρόγραμμα περιήγησής σας.", "Αντιγραφή διάγνωσης", "Αντιγράφηκε: {n} γραμμές. Επικολλήστε το στην αναφορά σφάλματός σας.", "Η αυτόματη αντιγραφή απέτυχε. Επιλέξτε το κείμενο παρακάτω και αντιγράψτε το.", "Η σελίδα της Valve άλλαξε, γι’ αυτό το DemoScope είναι απενεργοποιημένο εδώ. Ανοίξτε τις ρυθμίσεις και αντιγράψτε τη διάγνωση.", "Αναφορά στο GitHub", "Ανοίγει τη δημόσια σελίδα issues του GitHub σε νέα καρτέλα. Τίποτα δεν στέλνεται για εσάς: επικολλάτε μόνοι σας την αναφορά εκεί."],
+      "hu": ["Diagnosztika", "Ha az oldal megváltozik, és valami nem működik tovább, másolja ki ezt a jelentést, és küldje el a fejlesztőnek. Nem tartalmaz oldalszöveget, fióknevet vagy előzményeket: csak műszaki adatokat az oldalról és a böngészőjéről.", "Diagnosztika másolása", "Kimásolva: {n} sor. Illessze be a hibajelentésébe.", "Az automatikus másolás nem sikerült. Jelölje ki az alábbi szöveget, és másolja ki.", "A Valve oldala megváltozott, ezért a DemoScope itt ki van kapcsolva. Nyissa meg a beállításokat, és másolja ki a diagnosztikát.", "Jelentés a GitHubon", "Új lapon megnyitja a GitHub nyilvános hibajegyoldalát. Semmi sem megy el helyetted: a jelentést te illeszted be ott."],
+      "id": ["Diagnostik", "Jika halaman berubah dan ada yang berhenti berfungsi, salin laporan ini dan kirim ke pengembang. Laporan ini tidak berisi teks halaman, nama akun, atau riwayat: hanya informasi teknis tentang halaman dan browser Anda.", "Salin diagnostik", "Disalin: {n} baris. Tempel ke laporan bug Anda.", "Gagal menyalin otomatis. Pilih teks di bawah lalu salin.", "Halaman Valve berubah, jadi DemoScope dinonaktifkan di sini. Buka pengaturan dan salin diagnostik.", "Laporkan di GitHub", "Membuka halaman issues publik GitHub di tab baru. Tidak ada yang dikirim untuk Anda: Anda menempel laporannya sendiri di sana."],
+      "it": ["Diagnostica", "Se la pagina cambia e qualcosa smette di funzionare, copia questo rapporto e invialo allo sviluppatore. Non contiene testo della pagina, nome dell’account né cronologia: solo informazioni tecniche sulla pagina e sul tuo browser.", "Copia diagnostica", "Copiato: {n} righe. Incollalo nella tua segnalazione del bug.", "Copia automatica non riuscita. Seleziona il testo qui sotto e copialo.", "La pagina di Valve è cambiata, quindi DemoScope è disattivato qui. Apri le impostazioni e copia la diagnostica.", "Segnala su GitHub", "Apre la pagina pubblica delle issue di GitHub in una nuova scheda. Non viene inviato nulla al posto tuo: incolli tu stesso il rapporto lì."],
+      "ja": ["診断", "ページが変更されて動作しなくなった場合は、このレポートをコピーして開発者に送ってください。ページの文章、アカウント名、履歴は含まれず、ページとブラウザーに関する技術情報のみです。", "診断をコピー", "コピーしました：{n} 行。不具合の報告に貼り付けてください。", "自動コピーに失敗しました。下のテキストを選択してコピーしてください。", "Valve のページが変更されたため、このページでは DemoScope を無効にしました。設定を開いて診断をコピーしてください。", "GitHub で報告", "GitHub の公開 Issues ページを新しいタブで開きます。自動で送信されることはありません。レポートはご自身で貼り付けてください。"],
+      "ko": ["진단", "페이지가 바뀌어 기능이 작동하지 않으면 이 보고서를 복사해 개발자에게 보내 주세요. 페이지 텍스트, 계정 이름, 기록은 없고 페이지와 브라우저에 대한 기술 정보만 담겨 있습니다.", "진단 복사", "복사됨: {n}줄. 버그 신고에 붙여 넣으세요.", "자동 복사에 실패했습니다. 아래 텍스트를 선택해 복사하세요.", "Valve 페이지가 변경되어 이 페이지에서는 DemoScope가 꺼졌습니다. 설정을 열어 진단을 복사하세요.", "GitHub에 신고", "GitHub의 공개 Issues 페이지를 새 탭에서 엽니다. 자동으로 전송되는 것은 없으며, 보고서는 직접 붙여 넣으세요."],
+      "no": ["Diagnostikk", "Hvis siden endres og noe slutter å fungere, kopier denne rapporten og send den til utvikleren. Den inneholder ingen sidetekst, kontonavn eller historikk: bare tekniske opplysninger om siden og nettleseren din.", "Kopier diagnostikk", "Kopiert: {n} linjer. Lim det inn i feilrapporten din.", "Kunne ikke kopiere automatisk. Marker teksten under og kopier den.", "Valve-siden har endret seg, så DemoScope er slått av her. Åpne innstillingene og kopier diagnostikken.", "Rapporter på GitHub", "Åpner GitHubs offentlige issues-side i en ny fane. Ingenting sendes for deg: du limer inn rapporten selv der."],
+      "pl": ["Diagnostyka", "Jeśli strona się zmieni i coś przestanie działać, skopiuj ten raport i wyślij go twórcy. Nie zawiera tekstu strony, nazwy konta ani historii: tylko dane techniczne o stronie i Twojej przeglądarce.", "Kopiuj diagnostykę", "Skopiowano: {n} wierszy. Wklej to do zgłoszenia błędu.", "Nie udało się skopiować automatycznie. Zaznacz poniższy tekst i skopiuj go.", "Strona Valve uległa zmianie, więc DemoScope jest tu wyłączony. Otwórz ustawienia i skopiuj diagnostykę.", "Zgłoś na GitHubie", "Otwiera publiczną stronę zgłoszeń GitHuba w nowej karcie. Nic nie jest wysyłane za Ciebie: raport wklejasz tam sam."],
+      "pt-PT": ["Diagnóstico", "Se a página mudar e algo deixar de funcionar, copie este relatório e envie-o ao programador. Não contém texto da página, nome da conta nem histórico: apenas dados técnicos sobre a página e o seu navegador.", "Copiar diagnóstico", "Copiado: {n} linhas. Cole-o no seu relatório de erro.", "Não foi possível copiar automaticamente. Selecione o texto abaixo e copie-o.", "A página da Valve mudou, por isso o DemoScope está desativado aqui. Abra as definições e copie o diagnóstico.", "Reportar no GitHub", "Abre a página pública de issues do GitHub num novo separador. Nada é enviado por si: cole lá o relatório."],
+      "pt-BR": ["Diagnóstico", "Se a página mudar e algo parar de funcionar, copie este relatório e envie ao desenvolvedor. Ele não contém texto da página, nome da conta nem histórico: apenas dados técnicos sobre a página e o seu navegador.", "Copiar diagnóstico", "Copiado: {n} linhas. Cole no seu relatório de erro.", "Não foi possível copiar automaticamente. Selecione o texto abaixo e copie.", "A página da Valve mudou, por isso o DemoScope está desativado aqui. Abra as configurações e copie o diagnóstico.", "Reportar no GitHub", "Abre a página pública de issues do GitHub em uma nova aba. Nada é enviado por você: você mesmo cola o relatório lá."],
+      "ro": ["Diagnostic", "Dacă pagina se schimbă și ceva nu mai funcționează, copiați acest raport și trimiteți-l dezvoltatorului. Nu conține text din pagină, numele contului sau istoric: doar informații tehnice despre pagină și browserul dvs.", "Copiază diagnosticul", "Copiat: {n} rânduri. Lipiți-l în raportul de eroare.", "Copierea automată a eșuat. Selectați textul de mai jos și copiați-l.", "Pagina Valve s-a schimbat, așa că DemoScope este dezactivat aici. Deschideți setările și copiați diagnosticul.", "Raportează pe GitHub", "Deschide pagina publică de probleme de pe GitHub într-o filă nouă. Nu se trimite nimic în locul dvs.: lipiți singur raportul acolo."],
+      "es-ES": ["Diagnóstico", "Si la página cambia y algo deja de funcionar, copia este informe y envíaselo al desarrollador. No contiene texto de la página, nombre de cuenta ni historial: solo datos técnicos sobre la página y tu navegador.", "Copiar diagnóstico", "Copiado: {n} líneas. Pégalo en tu informe de error.", "No se pudo copiar automáticamente. Selecciona el texto de abajo y cópialo.", "La página de Valve ha cambiado, por eso DemoScope está desactivado aquí. Abre los ajustes y copia el diagnóstico.", "Informar en GitHub", "Abre la página pública de incidencias de GitHub en una pestaña nueva. No se envía nada por ti: pegas tú mismo el informe allí."],
+      "es-419": ["Diagnóstico", "Si la página cambia y algo deja de funcionar, copia este informe y envíaselo al desarrollador. No contiene texto de la página, nombre de cuenta ni historial: solo datos técnicos sobre la página y tu navegador.", "Copiar diagnóstico", "Copiado: {n} líneas. Pégalo en tu reporte de error.", "No se pudo copiar automáticamente. Selecciona el texto de abajo y cópialo.", "La página de Valve cambió, por eso DemoScope está desactivado aquí. Abre la configuración y copia el diagnóstico.", "Reportar en GitHub", "Abre la página pública de issues de GitHub en una pestaña nueva. No se envía nada por ti: pegas el reporte tú mismo allí."],
+      "sv": ["Diagnostik", "Om sidan ändras och något slutar fungera, kopiera den här rapporten och skicka den till utvecklaren. Den innehåller ingen sidtext, inget kontonamn och ingen historik: bara tekniska uppgifter om sidan och din webbläsare.", "Kopiera diagnostik", "Kopierat: {n} rader. Klistra in det i din felrapport.", "Det gick inte att kopiera automatiskt. Markera texten nedan och kopiera den.", "Valves sida har ändrats, så DemoScope är avstängt här. Öppna inställningarna och kopiera diagnostiken.", "Rapportera på GitHub", "Öppnar GitHubs publika ärendesida i en ny flik. Inget skickas åt dig: du klistrar in rapporten där själv."],
+      "th": ["การวินิจฉัย", "หากหน้าเว็บเปลี่ยนแปลงและบางอย่างหยุดทำงาน ให้คัดลอกรายงานนี้แล้วส่งให้นักพัฒนา รายงานไม่มีข้อความในหน้า ชื่อบัญชี หรือประวัติ มีเพียงข้อมูลทางเทคนิคเกี่ยวกับหน้าเว็บและเบราว์เซอร์ของคุณ", "คัดลอกข้อมูลวินิจฉัย", "คัดลอกแล้ว: {n} บรรทัด วางลงในรายงานข้อบกพร่องของคุณ", "คัดลอกอัตโนมัติไม่สำเร็จ เลือกข้อความด้านล่างแล้วคัดลอก", "หน้าเว็บของ Valve เปลี่ยนไป DemoScope จึงถูกปิดในหน้านี้ เปิดการตั้งค่าแล้วคัดลอกข้อมูลวินิจฉัย", "รายงานบน GitHub", "เปิดหน้า Issues สาธารณะของ GitHub ในแท็บใหม่ ระบบจะไม่ส่งอะไรให้คุณ: คุณต้องวางรายงานที่นั่นเอง"],
+      "tr": ["Tanılama", "Sayfa değişir ve bir şey çalışmayı bırakırsa, bu raporu kopyalayıp geliştiriciye gönderin. Sayfa metni, hesap adı veya geçmiş içermez: yalnızca sayfa ve tarayıcınız hakkında teknik bilgiler yer alır.", "Tanılamayı kopyala", "Kopyalandı: {n} satır. Hata raporunuza yapıştırın.", "Otomatik kopyalama başarısız oldu. Aşağıdaki metni seçip kopyalayın.", "Valve sayfası değişti, bu yüzden DemoScope burada devre dışı bırakıldı. Ayarları açıp tanılamayı kopyalayın.", "GitHub’da bildir", "GitHub’ın herkese açık sorunlar sayfasını yeni sekmede açar. Sizin yerinize hiçbir şey gönderilmez: raporu orada kendiniz yapıştırırsınız."],
+      "uk": ["Діагностика", "Якщо сторінка зміниться і щось перестане працювати, скопіюйте цей звіт і надішліть розробнику. Він не містить тексту сторінки, імені облікового запису чи історії: лише технічні відомості про сторінку та ваш браузер.", "Скопіювати діагностику", "Скопійовано: {n} рядків. Вставте це у звіт про помилку.", "Не вдалося скопіювати автоматично. Виділіть текст нижче й скопіюйте його.", "Сторінка Valve змінилася, тому DemoScope тут вимкнено. Відкрийте налаштування й скопіюйте діагностику.", "Повідомити на GitHub", "Відкриває публічну сторінку issues на GitHub у новій вкладці. Нічого не надсилається за вас: звіт ви вставляєте там самі."],
+      "vi": ["Chẩn đoán", "Nếu trang thay đổi và có gì đó ngừng hoạt động, hãy sao chép báo cáo này và gửi cho nhà phát triển. Báo cáo không chứa văn bản trang, tên tài khoản hay lịch sử: chỉ có thông tin kỹ thuật về trang và trình duyệt của bạn.", "Sao chép chẩn đoán", "Đã sao chép: {n} dòng. Hãy dán vào báo cáo lỗi của bạn.", "Không thể sao chép tự động. Hãy chọn văn bản bên dưới rồi sao chép.", "Trang của Valve đã thay đổi nên DemoScope bị tắt ở đây. Hãy mở cài đặt và sao chép chẩn đoán.", "Báo cáo trên GitHub", "Mở trang issues công khai của GitHub trong tab mới. Không có gì được gửi thay bạn: bạn tự dán báo cáo ở đó."],
+    };
+    for (const [locale, values] of Object.entries(DIAG_TRANSLATIONS)) {
+      const index = LOCALE_INDEX.indexOf(locale);
+      if (index < 0) continue;
+      DIAG_KEYS.forEach((key, position) => {
+        if (values[position] && SETTINGS_TEXT_ROWS[key]) SETTINGS_TEXT_ROWS[key][index] = values[position];
+      });
+    }
+  })();
+
+  // ---------------------------------------------------------------------------
+  // Indicator animations (the dot next to "DemoScope")
+  // ---------------------------------------------------------------------------
+  const ANIM_ENABLED_KEY = "demoscopeAnimEnabled";
+  const ANIM_STYLE_KEY = "demoscopeAnimStyle";
+  const ANIM_SPEED_KEY = "demoscopeAnimSpeed";
+  const ANIM_STYLES = ["pulse", "breathe", "ripple", "heartbeat", "orbit", "blink"];
+  const ANIM_SPEEDS = { slow: 0.6, normal: 1, fast: 1.7 };
+
+  function readStorage(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+
+  function writeStorage(key, value) {
+    try {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    } catch { /* Keep the choice for this page only. */ }
+  }
+
+  function animEnabled() {
+    const stored = readStorage(ANIM_ENABLED_KEY);
+    if (stored !== null) return stored === "true";
+    return !(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function animStyle() {
+    const stored = readStorage(ANIM_STYLE_KEY);
+    return ANIM_STYLES.includes(stored) ? stored : "pulse";
+  }
+
+  function animSpeedKey() {
+    const stored = readStorage(ANIM_SPEED_KEY);
+    return Object.prototype.hasOwnProperty.call(ANIM_SPEEDS, stored) ? stored : "normal";
+  }
+
+  function ensureAnimationStyles() {
+    if (document.getElementById("demoscope-anim-style")) return;
+    const live = (name, pseudo = "") =>
+      `html[data-ds-anim="${name}"] #vacnet-clip-history .vacnet-review-dot${pseudo}`;
+    const preview = (name, pseudo = "") => `.ds-anim-dot[data-anim="${name}"]${pseudo}`;
+    const both = (name, pseudo = "") => `${live(name, pseudo)}, ${preview(name, pseudo)}`;
+    const dur = (seconds) => `calc(${seconds}s / var(--ds-speed, 1))`;
+    const accent = "var(--ss-accent, #f2a33a)";
+    const style = document.createElement("style");
+    style.id = "demoscope-anim-style";
+    style.textContent = `
+      .ds-anim-dot {
+        position: relative;
+        display: inline-block;
+        flex: 0 0 auto;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: ${accent};
+        box-shadow: 0 0 0 4px rgba(242, 163, 58, 0.11), 0 0 14px rgba(242, 163, 58, 0.35);
+      }
+      html[data-ds-anim]:not([data-ds-anim="off"]) #vacnet-clip-history .vacnet-review-dot { position: relative; }
+      ${ANIM_STYLES.map((name) => `${both(name, "::before")}, ${both(name, "::after")}`).join(",\n")} {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      ${both("pulse", "::after")} { border: 1.5px solid ${accent}; animation: ds-pulse ${dur(1.9)} ease-out infinite; }
+      @keyframes ds-pulse { 0% { transform: scale(1); opacity: 0.75; } 100% { transform: scale(3.2); opacity: 0; } }
+
+      ${both("breathe")} { animation: ds-breathe ${dur(2.8)} ease-in-out infinite; }
+      @keyframes ds-breathe {
+        0%, 100% { transform: scale(0.88); opacity: 0.75; box-shadow: 0 0 0 3px rgba(242, 163, 58, 0.08), 0 0 8px rgba(242, 163, 58, 0.25); }
+        50% { transform: scale(1.12); opacity: 1; box-shadow: 0 0 0 6px rgba(242, 163, 58, 0.16), 0 0 20px rgba(242, 163, 58, 0.6); }
+      }
+
+      ${both("ripple", "::before")}, ${both("ripple", "::after")} { border: 1.5px solid ${accent}; animation: ds-ripple ${dur(2.4)} cubic-bezier(0.2, 0.6, 0.3, 1) infinite; }
+      ${both("ripple", "::after")} { animation-delay: ${dur(1.2)}; }
+      @keyframes ds-ripple { 0% { transform: scale(0.8); opacity: 0.8; } 70%, 100% { transform: scale(3.6); opacity: 0; } }
+
+      ${both("heartbeat")} { animation: ds-heartbeat ${dur(1.5)} ease-in-out infinite; }
+      @keyframes ds-heartbeat { 0%, 40%, 100% { transform: scale(1); } 10% { transform: scale(1.4); } 20% { transform: scale(1); } 28% { transform: scale(1.28); } }
+      ${both("heartbeat", "::after")} { border: 1.5px solid ${accent}; animation: ds-heartbeat-ring ${dur(1.5)} ease-out infinite; }
+      @keyframes ds-heartbeat-ring { 0% { transform: scale(1); opacity: 0; } 10% { opacity: 0.7; } 45%, 100% { transform: scale(2.7); opacity: 0; } }
+
+      ${both("orbit", "::before")} { inset: -6px; opacity: 1; border: 1px dashed rgba(242, 163, 58, 0.28); }
+      ${both("orbit", "::after")} { inset: -6px; opacity: 1; background: radial-gradient(circle at 50% 0, ${accent} 0 1.7px, transparent 2.2px); animation: ds-orbit ${dur(1.8)} linear infinite; }
+      @keyframes ds-orbit { to { transform: rotate(360deg); } }
+
+      ${both("blink")} { animation: ds-blink ${dur(1.3)} ease-in-out infinite; }
+      @keyframes ds-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+    `;
+    (document.head || document.documentElement).append(style);
+  }
+
+  // Dark, thin scrollbars: Chromium browsers (Brave, Chrome, Edge) otherwise draw
+  // a bright default bar inside the dark windows.
+  function ensureUiPolishStyles() {
+    if (document.getElementById("demoscope-polish-style")) return;
+    const style = document.createElement("style");
+    style.id = "demoscope-polish-style";
+    const targets = "#vacnet-settings-dialog, .ds-dialog, .vacnet-enhanced .verdicts-container";
+    style.textContent = `
+      ${targets} { color-scheme: dark; scrollbar-width: thin; scrollbar-color: #2c3745 transparent; }
+      #vacnet-settings-dialog::-webkit-scrollbar, .ds-dialog::-webkit-scrollbar,
+      .vacnet-enhanced .verdicts-container::-webkit-scrollbar { width: 10px; height: 10px; }
+      #vacnet-settings-dialog::-webkit-scrollbar-track, .ds-dialog::-webkit-scrollbar-track,
+      .vacnet-enhanced .verdicts-container::-webkit-scrollbar-track { background: transparent; }
+      #vacnet-settings-dialog::-webkit-scrollbar-thumb, .ds-dialog::-webkit-scrollbar-thumb,
+      .vacnet-enhanced .verdicts-container::-webkit-scrollbar-thumb { background: #2c3745; border: 2px solid transparent; border-radius: 8px; background-clip: content-box; }
+      #vacnet-settings-dialog::-webkit-scrollbar-thumb:hover, .ds-dialog::-webkit-scrollbar-thumb:hover,
+      .vacnet-enhanced .verdicts-container::-webkit-scrollbar-thumb:hover { background: #3d4a5c; background-clip: content-box; }
+    `;
+    (document.head || document.documentElement).append(style);
+  }
+
+  function applyAnimationSettings() {
+    ensureAnimationStyles();
+    const root = document.documentElement;
+    root.dataset.dsAnim = animEnabled() ? animStyle() : "off";
+    root.style.setProperty("--ds-speed", String(ANIM_SPEEDS[animSpeedKey()]));
+    refreshSettingsSummaries();
+  }
+
+  function ensureAnimationsDialog() {
+    let dialog = document.getElementById("vacnet-animations-dialog");
+    if (dialog instanceof HTMLDialogElement) return dialog;
+    ensureDemoscopeDialogStyles();
+    ensureAnimationStyles();
+
+    dialog = document.createElement("dialog");
+    dialog.id = "vacnet-animations-dialog";
+    dialog.className = "ds-dialog";
+    dialog.setAttribute("aria-labelledby", "vacnet-animations-title");
+    dialog.innerHTML = `
+      <div class="demoscope-settings-shell">
+        <header class="demoscope-settings-head">
+          <div><p class="demoscope-settings-kicker">DEMOSCOPE</p><h2 id="vacnet-animations-title"></h2></div>
+          <button class="demoscope-settings-close" type="button" data-an-close></button>
+        </header>
+        <p class="demoscope-settings-help" data-an-intro></p>
+        <section class="demoscope-settings-section">
+          <label class="demoscope-settings-toggle"><input type="checkbox" data-an-enabled><span data-an-enabled-label></span></label>
+          <div class="ds-an-speed" role="group">
+            <span class="ds-an-speed-label" data-an-speed-label></span>
+            <div class="ds-seg">${Object.keys(ANIM_SPEEDS).map((key) => `<button type="button" data-an-speed="${key}"></button>`).join("")}</div>
+          </div>
+          <p class="demoscope-settings-help ds-an-note" data-an-note hidden></p>
+        </section>
+        <section class="demoscope-settings-section">
+          <h3 data-an-style-label></h3>
+          <div class="ds-an-grid" role="radiogroup">${ANIM_STYLES.map((name) => `
+            <button type="button" class="ds-an-card" role="radio" aria-checked="false" data-an-style="${name}">
+              <span class="ds-an-preview"><span class="ds-anim-dot" data-anim="${name}"></span><span class="ds-an-word">DEMOSCOPE</span></span>
+              <span class="ds-an-name"></span><span class="ds-an-desc"></span>
+            </button>`).join("")}
+          </div>
+        </section>
+        <div class="demoscope-settings-actions">
+          <button type="button" class="demoscope-settings-secondary" data-an-reset></button>
+          <button type="button" class="demoscope-settings-secondary" data-an-close-text></button>
+        </div>
+      </div>`;
+    document.body.append(dialog);
+
+    const $ = (selector) => dialog.querySelector(selector);
+    const sync = () => {
+      const enabled = animEnabled();
+      const current = animStyle();
+      const speed = animSpeedKey();
+      $("[data-an-enabled]").checked = enabled;
+      $("[data-an-note]").hidden = enabled;
+      dialog.querySelectorAll("[data-an-style]").forEach((card) => {
+        const selected = card.dataset.anStyle === current;
+        card.setAttribute("aria-checked", String(selected));
+        card.classList.toggle("is-selected", selected);
+        card.classList.toggle("is-muted", !enabled);
+      });
+      dialog.querySelectorAll("[data-an-speed]").forEach((button) => {
+        button.classList.toggle("is-selected", button.dataset.anSpeed === speed);
+        button.setAttribute("aria-pressed", String(button.dataset.anSpeed === speed));
+      });
+    };
+
+    $("#vacnet-animations-title").textContent = settingText("anTitle");
+    $("[data-an-intro]").textContent = settingText("anIntro");
+    $("[data-an-enabled-label]").textContent = settingText("anEnabled");
+    $("[data-an-speed-label]").textContent = settingText("anSpeed");
+    $("[data-an-style-label]").textContent = settingText("anStyle");
+    $("[data-an-note]").textContent = settingText("anOffNote");
+    $("[data-an-reset]").textContent = settingText("anReset");
+    $("[data-an-close-text]").textContent = settingText("hkClose");
+    $("[data-an-close]").setAttribute("aria-label", settingText("hkClose"));
+    dialog.querySelector('[data-an-speed="slow"]').textContent = settingText("anSlow");
+    dialog.querySelector('[data-an-speed="normal"]').textContent = settingText("anNormal");
+    dialog.querySelector('[data-an-speed="fast"]').textContent = settingText("anFast");
+    dialog.querySelectorAll("[data-an-style]").forEach((card) => {
+      card.querySelector(".ds-an-name").textContent = settingText(`anStyle_${card.dataset.anStyle}`);
+      card.querySelector(".ds-an-desc").textContent = settingText(`anStyleDesc_${card.dataset.anStyle}`);
+    });
+
+    dialog.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (target.closest("[data-an-close], [data-an-close-text]")) { dialog.close(); return; }
+      const card = target.closest("[data-an-style]");
+      if (card) {
+        writeStorage(ANIM_STYLE_KEY, card.dataset.anStyle);
+        applyAnimationSettings();
+        sync();
+        playUiSound("select");
+        return;
+      }
+      const speed = target.closest("[data-an-speed]");
+      if (speed) {
+        writeStorage(ANIM_SPEED_KEY, speed.dataset.anSpeed);
+        applyAnimationSettings();
+        sync();
+        playUiSound("click");
+        return;
+      }
+      if (target.closest("[data-an-reset]")) {
+        [ANIM_ENABLED_KEY, ANIM_STYLE_KEY, ANIM_SPEED_KEY].forEach((key) => writeStorage(key, null));
+        applyAnimationSettings();
+        sync();
+        playUiSound("confirm");
+      }
+    });
+    $("[data-an-enabled]").addEventListener("change", (event) => {
+      writeStorage(ANIM_ENABLED_KEY, String(event.target.checked));
+      applyAnimationSettings();
+      sync();
+      playUiSound("toggle");
+    });
+    dialog.addEventListener("close", () => playUiSound("close"));
+    dialog.demoscopeSync = sync;
+    sync();
+    return dialog;
+  }
+
+  function openAnimationsDialog() {
+    const dialog = ensureAnimationsDialog();
+    if (dialog.open) return;
+    dialog.demoscopeSync?.();
+    dialog.showModal();
+    playUiSound("open");
+    dialog.querySelector(".ds-an-card.is-selected, .ds-an-card")?.focus();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared look of the DemoScope sub-windows (hotkeys, animations)
+  // ---------------------------------------------------------------------------
+  function ensureDemoscopeDialogStyles() {
+    if (document.getElementById("demoscope-dialog-style")) return;
+    const style = document.createElement("style");
+    style.id = "demoscope-dialog-style";
+    style.textContent = `
+      .ds-dialog { text-align: left; box-sizing: border-box; width: min(700px, calc(100vw - 20px)); max-width: none; max-height: min(88vh, calc(100dvh - 20px)); padding: 0; overflow: auto; border: 1px solid rgba(226,235,246,.16); border-radius: 17px; background: #0e131b; color: #f4f7fb; box-shadow: 0 28px 90px #000a; font: 500 .9rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .ds-dialog::backdrop { background: rgba(2,4,8,.72); backdrop-filter: blur(8px); }
+      .ds-dialog .demoscope-settings-shell { padding: clamp(18px, 4vw, 28px); }
+      .ds-dialog .demoscope-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+      .ds-dialog .demoscope-settings-kicker { margin: 0 0 3px; color: #f2a33a; font-size: .68rem; font-weight: 800; letter-spacing: .15em; }
+      .ds-dialog .demoscope-settings-head h2 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
+      .ds-dialog .demoscope-settings-close { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(226,235,246,.15); border-radius: 10px; background: #141b25; color: #d7e0ec; font-size: 1.25rem; cursor: pointer; }
+      .ds-dialog .demoscope-settings-close::before { content: "×"; }
+      .ds-dialog .demoscope-settings-close:hover, .ds-dialog .demoscope-settings-secondary:hover { border-color: rgba(242,163,58,.6); color: #ffb654; }
+      .ds-dialog .demoscope-settings-section { margin-top: 12px; padding: 16px; border: 1px solid rgba(226,235,246,.1); border-radius: 12px; background: #0a0e14; }
+      .ds-dialog .demoscope-settings-section h3 { margin: 0 0 8px; color: #f2a33a; font-size: .77rem; letter-spacing: .09em; text-transform: uppercase; }
+      .ds-dialog .demoscope-settings-toggle { display: flex; align-items: center; gap: 10px; color: #c4cedb; }
+      .ds-dialog .demoscope-settings-toggle input { width: 17px; height: 17px; accent-color: #f2a33a; }
+      .ds-dialog .demoscope-settings-help { margin: 0 0 8px; color: #8795a8; font-size: .8rem; }
+      .ds-dialog .demoscope-settings-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+      .ds-dialog .demoscope-settings-secondary { min-height: 39px; padding: 0 14px; border: 1px solid rgba(226,235,246,.16); border-radius: 9px; background: #17202b; color: #e8edf5; font: 650 .8rem system-ui, sans-serif; cursor: pointer; }
+      .ds-dialog :is(button, input):focus-visible { outline: 2px solid #ffb654; outline-offset: 3px; }
+
+      .ds-seg { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid rgba(226,235,246,.12); border-radius: 10px; background: #0e131b; }
+      .ds-seg button { min-height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: #9aa8bb; font: 650 .76rem system-ui, sans-serif; cursor: pointer; }
+      .ds-seg button.is-selected { background: rgba(242,163,58,.16); color: #ffb654; }
+      .ds-an-speed { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: #c4cedb; }
+      .ds-an-note { margin: 12px 0 0 !important; }
+      .ds-an-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+      .ds-an-card { display: grid; gap: 4px; padding: 10px; text-align: left; border: 1px solid rgba(226,235,246,.12); border-radius: 12px; background: #0e131b; color: #e8edf5; font: inherit; cursor: pointer; transition: border-color 140ms ease, background 140ms ease, transform 140ms ease; }
+      .ds-an-card:hover { border-color: rgba(242,163,58,.5); transform: translateY(-1px); }
+      .ds-an-card.is-selected { border-color: #f2a33a; background: rgba(242,163,58,.07); box-shadow: 0 0 0 1px rgba(242,163,58,.35); }
+      .ds-an-preview { display: flex; align-items: center; justify-content: center; gap: 10px; height: 64px; margin-bottom: 4px; border-radius: 9px; background: #0a0e14; overflow: hidden; color: #aab6c8; font: 750 .6875rem/1 system-ui, sans-serif; letter-spacing: .12em; }
+      .ds-an-card.is-muted .ds-an-name::after { content: ""; }
+      .ds-an-name { font-weight: 700; font-size: .86rem; }
+      .ds-an-desc { color: #8795a8; font-size: .75rem; line-height: 1.35; }
+
+      .ds-hk-group { padding-bottom: 6px !important; }
+      .ds-hk-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 14px; padding: 11px 0; border-top: 1px solid rgba(226,235,246,.07); }
+      .ds-hk-group h3 + .ds-hk-row { border-top: 0; }
+      .ds-hk-name { font-weight: 650; color: #f1f5fa; }
+      .ds-hk-desc { margin-top: 1px; color: #8795a8; font-size: .78rem; line-height: 1.4; }
+      .ds-hk-controls { display: flex; align-items: center; gap: 7px; }
+      .ds-hk-key { min-width: 84px; height: 36px; padding: 0 12px; border: 1px solid rgba(226,235,246,.2); border-radius: 9px; background: #18212d; color: #fff; font: 700 .85rem ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; transition: border-color 140ms ease, background 140ms ease; }
+      .ds-hk-key:hover { border-color: rgba(242,163,58,.6); }
+      .ds-hk-row.is-changed .ds-hk-key { border-color: rgba(242,163,58,.55); background: rgba(242,163,58,.1); }
+      .ds-hk-row.is-unset .ds-hk-key { border-style: dashed; border-color: rgba(255,135,148,.5); color: #ff8794; font: 650 .78rem system-ui, sans-serif; background: transparent; }
+      .ds-hk-row.is-capturing .ds-hk-key { border-color: #f2a33a; color: #ffb654; font: 650 .78rem system-ui, sans-serif; animation: ds-hk-wait 1s ease-in-out infinite; }
+      @keyframes ds-hk-wait { 0%, 100% { box-shadow: 0 0 0 0 rgba(242,163,58,.45); } 50% { box-shadow: 0 0 0 5px rgba(242,163,58,0); } }
+      .ds-hk-reset { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid rgba(226,235,246,.16); border-radius: 9px; background: #17202b; color: #c4cedb; cursor: pointer; }
+      .ds-hk-reset:hover { border-color: rgba(242,163,58,.6); color: #ffb654; }
+      .ds-hk-reset svg { width: 16px; height: 16px; }
+      .ds-hk-conflict { grid-column: 1 / -1; padding: 11px 13px; border: 1px solid rgba(242,163,58,.3); border-left: 3px solid #f2a33a; border-radius: 9px; background: rgba(242,163,58,.08); color: #ecd7b3; font-size: .8rem; line-height: 1.45; }
+      .ds-hk-conflict strong { display: block; margin-bottom: 3px; color: #ffc678; }
+      .ds-hk-conflict p { margin: 0 0 6px; }
+      .ds-hk-conflict .ds-hk-help { color: #b9a583; font-size: .75rem; }
+      .ds-hk-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+      .ds-hk-conflict-actions button { min-height: 34px; padding: 0 13px; border: 1px solid rgba(226,235,246,.18); border-radius: 8px; background: #17202b; color: #f1f5fa; font: 650 .78rem system-ui, sans-serif; cursor: pointer; }
+      .ds-hk-conflict-actions button:first-child { border-color: rgba(242,163,58,.6); background: rgba(242,163,58,.18); color: #ffd7a1; }
+      .ds-hk-status { min-height: 1.4em; margin: 10px 2px 0; color: #9aa8bb; font-size: .8rem; }
+      .ds-hk-status.is-warn { color: #ffb654; }
+      .ds-hk-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 9px; margin-top: 12px; }
+      @media (max-width: 520px) { .ds-hk-row { grid-template-columns: 1fr; } .ds-hk-controls { justify-content: flex-start; } }
+      @media (prefers-reduced-motion: reduce) { .ds-hk-row.is-capturing .ds-hk-key { animation: none; } }
+    `;
+    (document.head || document.documentElement).append(style);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hotkeys window
+  // ---------------------------------------------------------------------------
+  const hkState = { capturing: null, conflict: null, resetAllArmed: false, message: "", warn: false };
+
+  function hkActionName(id) { return settingText(`hkName_${id}`); }
+  function hkGroupName(group) { return settingText(`hkGroup_${group}`); }
+
+  function hkActionDescription(id) {
+    const quick = id.match(/^quick([1-5])$/);
+    if (quick) {
+      const n = Number(quick[1]);
+      const classic = [tr("quickBotPreset"), tr("quickCheaterOne"), tr("quickCheaterTwo"), tr("quickCleanPlayer"), tr("quickSkip")][n - 1];
+      const single = n <= 3 ? [tr("cheatYes"), tr("uncertain"), tr("cheatNo")][n - 1] : "";
+      return fmt(settingText(single ? "hkDescQuick" : "hkDescQuickClassicOnly"), { a: classic, b: single });
+    }
+    return settingText(`hkDesc_${id}`);
+  }
+
+  function hkSetMessage(text, warn = false) {
+    hkState.message = text;
+    hkState.warn = warn;
+  }
+
+  function hkCancelCapture() {
+    hkState.capturing = null;
+    keyCaptureActive = false;
+  }
+
+  function hkRowMarkup(action) {
+    const code = getBinding(action.id);
+    const changed = code !== action.def;
+    const capturing = hkState.capturing === action.id;
+    const classes = ["ds-hk-row", changed ? "is-changed" : "", !code ? "is-unset" : "", capturing ? "is-capturing" : ""].filter(Boolean).join(" ");
+    const keyText = capturing ? settingText("hkPress") : !code ? settingText("hkNotSet") : formatKeyLabel(code);
+    const name = hkActionName(action.id);
+    const resetLabel = fmt(settingText("hkResetOne"), { key: formatKeyLabel(action.def) });
+
+    let conflict = "";
+    if (hkState.conflict && hkState.conflict.actionId === action.id) {
+      const other = KEY_ACTION_BY_ID.get(hkState.conflict.otherId);
+      const previous = getBinding(action.id);
+      const body = fmt(settingText("hkConflictBody"), {
+        key: `“${formatKeyLabel(hkState.conflict.code)}”`,
+        action: hkActionName(other.id),
+        group: hkGroupName(other.group),
+        desc: hkActionDescription(other.id),
+      });
+      const help = previous
+        ? fmt(settingText("hkConflictHelpSwap"), { other: hkActionName(other.id), prev: `“${formatKeyLabel(previous)}”` })
+        : fmt(settingText("hkConflictHelp"), { other: hkActionName(other.id) });
+      conflict = `
+        <div class="ds-hk-conflict" role="alert">
+          <strong>${escapeHtml(settingText("hkConflictTitle"))}</strong>
+          <p>${escapeHtml(body)}</p>
+          <p class="ds-hk-help">${escapeHtml(help)}</p>
+          <div class="ds-hk-conflict-actions">
+            <button type="button" data-hk-replace>${escapeHtml(settingText("hkReplace"))}</button>
+            ${previous ? `<button type="button" data-hk-swap>${escapeHtml(settingText("hkSwap"))}</button>` : ""}
+            <button type="button" data-hk-conflict-cancel>${escapeHtml(settingText("hkCancel"))}</button>
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="${classes}" data-hk-action="${action.id}">
+        <div class="ds-hk-info">
+          <div class="ds-hk-name">${escapeHtml(name)}</div>
+          <div class="ds-hk-desc">${escapeHtml(hkActionDescription(action.id))}</div>
+        </div>
+        <div class="ds-hk-controls">
+          <button type="button" class="ds-hk-key" data-hk-change aria-label="${escapeHtml(fmt(settingText("hkChangeAria"), { action: name }))}">${escapeHtml(keyText)}</button>
+          ${changed ? `<button type="button" class="ds-hk-reset" data-hk-reset title="${escapeHtml(resetLabel)}" aria-label="${escapeHtml(resetLabel)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>` : ""}
+        </div>
+        ${conflict}
+      </div>`;
+  }
+
+  function renderHotkeys() {
+    const dialog = document.getElementById("vacnet-hotkeys-dialog");
+    if (!dialog) return;
+    const scrollTop = dialog.scrollTop;
+    dialog.querySelector("[data-hk-list]").innerHTML = KEY_GROUPS.map((group) => `
+      <section class="demoscope-settings-section ds-hk-group">
+        <h3>${escapeHtml(hkGroupName(group))}</h3>
+        ${KEY_ACTIONS.filter((action) => action.group === group).map(hkRowMarkup).join("")}
+      </section>`).join("");
+    const status = dialog.querySelector("[data-hk-status]");
+    status.textContent = hkState.message;
+    status.classList.toggle("is-warn", hkState.warn);
+    dialog.querySelector("[data-hk-reset-all]").textContent = settingText(hkState.resetAllArmed ? "hkResetAllConfirm" : "hkResetAll");
+    dialog.scrollTop = scrollTop;
+  }
+
+  function hkCommit(actionId, code, mode = "replace") {
+    const previous = getBinding(actionId);
+    const conflict = findKeyConflict(actionId, code);
+    if (conflict) setBinding(conflict.id, mode === "swap" && previous ? previous : "");
+    setBinding(actionId, code);
+    hkCancelCapture();
+    hkState.conflict = null;
+    hkSetMessage(fmt(settingText("hkSaved"), { action: hkActionName(actionId), key: formatKeyLabel(code) }));
+    refreshKeyLabels();
+    playUiSound("confirm");
+    renderHotkeys();
+  }
+
+  function hkRequestAssign(actionId, code) {
+    if (code === getBinding(actionId)) {
+      hkCancelCapture();
+      hkState.conflict = null;
+      hkSetMessage(settingText("hkUnchanged"));
+      renderHotkeys();
+      return;
+    }
+    const other = findKeyConflict(actionId, code);
+    if (other) {
+      hkCancelCapture();
+      hkState.conflict = { actionId, code, otherId: other.id };
+      hkSetMessage("");
+      playUiSound("error");
+      renderHotkeys();
+      document.querySelector(`#vacnet-hotkeys-dialog [data-hk-action="${actionId}"] [data-hk-replace]`)?.focus();
+      return;
+    }
+    hkCommit(actionId, code);
+  }
+
+  function ensureHotkeysDialog() {
+    let dialog = document.getElementById("vacnet-hotkeys-dialog");
+    if (dialog instanceof HTMLDialogElement) return dialog;
+    ensureDemoscopeDialogStyles();
+
+    dialog = document.createElement("dialog");
+    dialog.id = "vacnet-hotkeys-dialog";
+    dialog.className = "ds-dialog";
+    dialog.setAttribute("aria-labelledby", "vacnet-hotkeys-title");
+    dialog.innerHTML = `
+      <div class="demoscope-settings-shell">
+        <header class="demoscope-settings-head">
+          <div><p class="demoscope-settings-kicker">DEMOSCOPE</p><h2 id="vacnet-hotkeys-title"></h2></div>
+          <button class="demoscope-settings-close" type="button" data-hk-close></button>
+        </header>
+        <p class="demoscope-settings-help" data-hk-intro></p>
+        <div data-hk-list></div>
+        <p class="ds-hk-status" data-hk-status role="status" aria-live="polite"></p>
+        <div class="ds-hk-footer">
+          <button type="button" class="demoscope-settings-secondary" data-hk-reset-all></button>
+          <button type="button" class="demoscope-settings-secondary" data-hk-close-text></button>
+        </div>
+      </div>`;
+    document.body.append(dialog);
+
+    dialog.querySelector("#vacnet-hotkeys-title").textContent = settingText("hkTitle");
+    dialog.querySelector("[data-hk-intro]").textContent = settingText("hkIntro");
+    dialog.querySelector("[data-hk-close]").setAttribute("aria-label", settingText("hkClose"));
+    dialog.querySelector("[data-hk-close-text]").textContent = settingText("hkClose");
+
+    dialog.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (target.closest("[data-hk-close], [data-hk-close-text]")) { dialog.close(); return; }
+
+      const row = target.closest("[data-hk-action]");
+      const actionId = row?.dataset.hkAction;
+
+      if (target.closest("[data-hk-reset-all]")) {
+        if (!hkState.resetAllArmed) {
+          hkState.resetAllArmed = true;
+          renderHotkeys();
+          return;
+        }
+        hkState.resetAllArmed = false;
+        hkCancelCapture();
+        hkState.conflict = null;
+        resetAllBindings();
+        hkSetMessage(settingText("hkResetDone"));
+        refreshKeyLabels();
+        playUiSound("confirm");
+        renderHotkeys();
+        return;
+      }
+      if (hkState.resetAllArmed) { hkState.resetAllArmed = false; renderHotkeys(); }
+
+      if (!actionId) return;
+      if (target.closest("[data-hk-change]")) {
+        const wasCapturing = hkState.capturing === actionId;
+        hkCancelCapture();
+        hkState.conflict = null;
+        hkSetMessage("");
+        if (!wasCapturing) {
+          hkState.capturing = actionId;
+          keyCaptureActive = true;
+          playUiSound("click");
+        }
+        renderHotkeys();
+        dialog.querySelector(`[data-hk-action="${actionId}"] [data-hk-change]`)?.focus();
+        return;
+      }
+      if (target.closest("[data-hk-reset]")) {
+        hkCancelCapture();
+        hkRequestAssign(actionId, KEY_ACTION_BY_ID.get(actionId).def);
+        return;
+      }
+      if (target.closest("[data-hk-replace]") && hkState.conflict) {
+        hkCommit(actionId, hkState.conflict.code, "replace");
+        return;
+      }
+      if (target.closest("[data-hk-swap]") && hkState.conflict) {
+        hkCommit(actionId, hkState.conflict.code, "swap");
+        return;
+      }
+      if (target.closest("[data-hk-conflict-cancel]")) {
+        hkState.conflict = null;
+        renderHotkeys();
+        dialog.querySelector(`[data-hk-action="${actionId}"] [data-hk-change]`)?.focus();
+      }
+    });
+
+    // Key capture: runs before every other DemoScope handler.
+    window.addEventListener("keydown", (event) => {
+      if (!keyCaptureActive || !hkState.capturing) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.repeat) return;
+      const actionId = hkState.capturing;
+      const code = normalizeKeyCode(event.code);
+      if (event.ctrlKey || event.altKey || event.metaKey || !code) {
+        hkSetMessage(settingText("hkReserved"), true);
+        renderHotkeys();
+        return;
+      }
+      const problem = validateKeyForAction(actionId, code);
+      if (problem) {
+        hkSetMessage(settingText(problem === "shift" ? "hkShiftOnly" : "hkReserved"), true);
+        playUiSound("error");
+        renderHotkeys();
+        return;
+      }
+      hkRequestAssign(actionId, code);
+    }, true);
+
+    dialog.addEventListener("cancel", (event) => {
+      if (hkState.capturing || hkState.conflict) {
+        event.preventDefault();
+        hkCancelCapture();
+        hkState.conflict = null;
+        renderHotkeys();
+      }
+    });
+    dialog.addEventListener("close", () => {
+      hkCancelCapture();
+      hkState.conflict = null;
+      hkState.resetAllArmed = false;
+      playUiSound("close");
+    });
+    return dialog;
+  }
+
+  function openHotkeysDialog() {
+    const dialog = ensureHotkeysDialog();
+    if (dialog.open) return;
+    hkState.message = "";
+    hkState.warn = false;
+    hkState.conflict = null;
+    hkState.resetAllArmed = false;
+    renderHotkeys();
+    dialog.showModal();
+    playUiSound("open");
+    dialog.querySelector("[data-hk-change]")?.focus();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main settings window: entries for the two sub-windows on top, one reset at
+  // the bottom, everything left-aligned like the sub-windows.
+  // ---------------------------------------------------------------------------
+  function ensureSettingsLayoutStyles() {
+    if (document.getElementById("demoscope-settings-layout-style")) return;
+    const style = document.createElement("style");
+    style.id = "demoscope-settings-layout-style";
+    style.textContent = `
+      #vacnet-settings-dialog { text-align: left; }
+      #vacnet-settings-dialog .demoscope-settings-section h3,
+      #vacnet-settings-dialog .demoscope-settings-help { text-align: left; }
+      #vacnet-settings-dialog .demoscope-settings-actions { justify-content: flex-start; }
+      .ds-settings-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; }
+      .ds-settings-entry h3 { margin: 0 0 4px !important; }
+      .ds-settings-entry .demoscope-settings-help { margin: 0 !important; }
+      .ds-entry-summary { display: inline-block; margin: 9px 0 0; padding: 3px 10px; border: 1px solid rgba(226,235,246,.12); border-radius: 99px; background: #0e131b; color: #b4bfce; font: 650 .72rem system-ui, sans-serif; }
+      .ds-reset-section .demoscope-settings-help { margin: 0 0 10px !important; }
+      .ds-diag-section .demoscope-settings-help { margin: 0 0 10px !important; }
+      .ds-diag-section [role="status"] { margin: 10px 0 0 !important; }
+      .ds-diag-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+      .ds-diag-step { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 12px; padding: 12px; border: 1px solid rgba(226,235,246,.1); border-radius: 12px; background: #0e131b; transition: border-color 200ms ease, box-shadow 200ms ease; }
+      .ds-diag-step.is-ready { border-color: rgba(242,163,58,.55); box-shadow: 0 0 0 3px rgba(242,163,58,.1); animation: ds-step-ready 1.1s ease-out 1; }
+      @keyframes ds-step-ready { from { box-shadow: 0 0 0 0 rgba(242,163,58,.55); } to { box-shadow: 0 0 0 3px rgba(242,163,58,.1); } }
+      .ds-step-no { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(242,163,58,.14); color: #ffb654; font: 800 .8rem system-ui, sans-serif; }
+      .ds-step-body .demoscope-settings-help { margin: 8px 0 0 !important; }
+      .ds-github-link { display: inline-flex; align-items: center; gap: 9px; min-height: 39px; padding: 0 14px; border: 1px solid rgba(226,235,246,.24); border-radius: 9px; background: #17202b; color: #f1f5fa; font: 650 .8rem system-ui, sans-serif; text-decoration: none; cursor: pointer; transition: border-color 140ms ease, color 140ms ease; }
+      .ds-github-link:hover { border-color: rgba(242,163,58,.65); color: #ffb654; text-decoration: none; }
+      .ds-github-link:focus-visible { outline: 2px solid #ffb654; outline-offset: 3px; }
+      .ds-github-link svg { width: 16px; height: 16px; flex: 0 0 auto; }
+      .ds-github-link .ds-ext { width: 12px; height: 12px; opacity: .7; }
+      .ds-diag-url { display: block; margin-top: 9px; font: 500 .74rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #7d8ba0; word-break: break-all; }
+      .ds-diag-url b { color: #e8edf5; font-weight: 700; }
+      .ds-diag-text { box-sizing: border-box; width: 100%; margin-top: 10px; padding: 10px; border: 1px solid rgba(226,235,246,.16); border-radius: 9px; background: #0a0e14; color: #c4cedb; font: 500 .72rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+      @media (max-width: 520px) { .ds-settings-entry { grid-template-columns: 1fr; } .ds-settings-entry button { width: 100%; } }
+    `;
+    (document.head || document.documentElement).append(style);
+  }
+
+  const ANIM_SPEED_LABEL_KEYS = { slow: "anSlow", normal: "anNormal", fast: "anFast" };
+
+  function refreshSettingsSummaries() {
+    const dialog = document.getElementById("vacnet-settings-dialog");
+    if (!dialog) return;
+    const hotkeys = dialog.querySelector('[data-ds-summary="hotkeys"]');
+    if (hotkeys) {
+      const changed = KEY_ACTIONS.filter((action) => getBinding(action.id) !== action.def).length;
+      hotkeys.textContent = changed ? fmt(settingText("hkSummaryChanged"), { n: changed }) : settingText("hkSummaryDefault");
+    }
+    const animations = dialog.querySelector('[data-ds-summary="animations"]');
+    if (animations) {
+      animations.textContent = animEnabled()
+        ? `${settingText(`anStyle_${animStyle()}`)} · ${settingText(ANIM_SPEED_LABEL_KEYS[animSpeedKey()])}`
+        : settingText("anSummaryOff");
+    }
+  }
+
+  function installExtraSettingsSections(settingsDialog) {
+    if (settingsDialog.querySelector("[data-ds-entry]")) return;
+    ensureSettingsLayoutStyles();
+    const shell = settingsDialog.querySelector(".demoscope-settings-shell");
+    const head = shell.querySelector(".demoscope-settings-head");
+
+    const entry = (id, titleKey, noteKey, buttonKey, handler) => {
+      const section = document.createElement("section");
+      section.className = "demoscope-settings-section ds-settings-entry";
+      section.dataset.dsEntry = id;
+      const text = document.createElement("div");
+      const title = document.createElement("h3");
+      title.textContent = settingText(titleKey);
+      const note = document.createElement("p");
+      note.className = "demoscope-settings-help";
+      note.textContent = settingText(noteKey);
+      const summary = document.createElement("span");
+      summary.className = "ds-entry-summary";
+      summary.dataset.dsSummary = id;
+      text.append(title, note, summary);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "demoscope-settings-secondary";
+      button.textContent = settingText(buttonKey);
+      button.addEventListener("click", handler);
+      section.append(text, button);
+      return section;
+    };
+    head.after(
+      entry("hotkeys", "hkTitle", "hkOpenNote", "hkOpenButton", openHotkeysDialog),
+      entry("animations", "anTitle", "anOpenNote", "anOpenButton", openAnimationsDialog),
+    );
+
+    // The old "settings key" block is replaced by the Hotkeys window; its reset
+    // button and status line move into a dedicated reset section at the bottom.
+    const REPORT_URL = "https://github.com/ebayybe/DemoScope/issues";
+    const diagSection = document.createElement("section");
+    diagSection.className = "demoscope-settings-section ds-diag-section";
+    const diagTitle = document.createElement("h3");
+    diagTitle.textContent = settingText("diagTitle");
+    const diagNote = document.createElement("p");
+    diagNote.className = "demoscope-settings-help";
+    diagNote.textContent = settingText("diagNote");
+
+    const steps = document.createElement("ol");
+    steps.className = "ds-diag-steps";
+    const makeStep = (number) => {
+      const item = document.createElement("li");
+      item.className = "ds-diag-step";
+      const badge = document.createElement("span");
+      badge.className = "ds-step-no";
+      badge.setAttribute("aria-hidden", "true");
+      badge.textContent = String(number);
+      const body = document.createElement("div");
+      body.className = "ds-step-body";
+      item.append(badge, body);
+      return { item, body };
+    };
+
+    // Step 1: copy the report.
+    const stepCopy = makeStep(1);
+    const diagButton = document.createElement("button");
+    diagButton.type = "button";
+    diagButton.className = "demoscope-settings-secondary";
+    diagButton.textContent = settingText("diagButton");
+    const diagStatus = document.createElement("p");
+    diagStatus.className = "demoscope-settings-help";
+    diagStatus.setAttribute("role", "status");
+    const diagText = document.createElement("textarea");
+    diagText.readOnly = true;
+    diagText.hidden = true;
+    diagText.rows = 8;
+    diagText.className = "ds-diag-text";
+    stepCopy.body.append(diagButton, diagStatus, diagText);
+
+    // Step 2: a plain link to the public GitHub issues page. The address is
+    // printed in full, opens in a new tab, and nothing is sent automatically.
+    const stepReport = makeStep(2);
+    const reportLink = document.createElement("a");
+    reportLink.className = "ds-github-link";
+    reportLink.href = REPORT_URL;
+    reportLink.target = "_blank";
+    reportLink.rel = "noopener noreferrer";
+    reportLink.title = REPORT_URL;
+    reportLink.innerHTML =
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>' +
+      '<span></span>' +
+      '<svg class="ds-ext" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M9 2h5v5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5"/></svg>';
+    reportLink.querySelector("span").textContent = settingText("diagReportButton");
+    reportLink.setAttribute("aria-label", `${settingText("diagReportButton")} (github.com)`);
+    const reportUrl = document.createElement("span");
+    reportUrl.className = "ds-diag-url";
+    reportUrl.innerHTML = "<span>https://</span><b>github.com</b><span>/ebayybe/DemoScope/issues</span>";
+    const reportNote = document.createElement("p");
+    reportNote.className = "demoscope-settings-help";
+    reportNote.textContent = settingText("diagReportNote");
+    stepReport.body.append(reportLink, reportUrl, reportNote);
+
+    diagButton.addEventListener("click", async () => {
+      if (await copyDiagnostics(diagStatus, diagText)) stepReport.item.classList.add("is-ready");
+    });
+    steps.append(stepCopy.item, stepReport.item);
+    diagSection.append(diagTitle, diagNote, steps);
+    shell.append(diagSection);
+
+    const legacy = shell.querySelector(".demoscope-settings-shortcut-section");
+    const resetButton = legacy?.querySelector("#demoscope-settings-reset-defaults");
+    const status = legacy?.querySelector("#demoscope-settings-key-status");
+    if (legacy && resetButton && status) {
+      const reset = document.createElement("section");
+      reset.className = "demoscope-settings-section ds-reset-section";
+      const title = document.createElement("h3");
+      title.textContent = settingText("resetSectionTitle");
+      const note = document.createElement("p");
+      note.className = "demoscope-settings-help";
+      note.textContent = settingText("resetSectionNote");
+      const actions = document.createElement("div");
+      actions.className = "demoscope-settings-actions";
+      resetButton.className = "demoscope-settings-danger";
+      actions.append(resetButton);
+      reset.append(title, note, status, actions);
+      shell.append(reset);
+      legacy.hidden = true;
+    }
+    refreshSettingsSummaries();
+  }
+
   function openSettingsDialog(opener = null) {
     const dialog = ensureSettingsDialog();
     settingsReturnFocus = opener instanceof HTMLElement
@@ -937,6 +2532,7 @@
     dialog.querySelector("[data-history-stats]").textContent = getSettingsHistorySummary();
     dialog.querySelector("#demoscope-settings-change-key").textContent = settingText("settingsChangeKey");
     dialog.querySelector("#demoscope-settings-key-status").textContent = "";
+    refreshSettingsSummaries();
     dialog.showModal();
     playUiSound("open");
     dialog.querySelector(".demoscope-settings-close").focus();
@@ -947,6 +2543,7 @@
     if (document.documentElement.dataset.demoscopeSettingsHotkeyBound !== "1") {
       document.documentElement.dataset.demoscopeSettingsHotkeyBound = "1";
       window.addEventListener("keydown", (event) => {
+        if (keyCaptureActive) return;
         if (isCapturingSettingsHotkey) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -961,15 +2558,26 @@
             dialog.querySelector("#demoscope-settings-key-status").textContent = settingText("settingsKeyReserved");
             return;
           }
-          try { localStorage.setItem(SETTINGS_HOTKEY_STORAGE_KEY, hotkeyCode); } catch { /* This page retains the new setting until reload. */ }
+          const normalizedHotkey = normalizeKeyCode(hotkeyCode);
+          const hotkeyConflict = findKeyConflict("settings", normalizedHotkey);
+          if (hotkeyConflict) {
+            dialog.querySelector("#demoscope-settings-key-status").textContent = fmt(settingText("hkConflictShort"), {
+              key: formatKeyLabel(normalizedHotkey), action: hkActionName(hotkeyConflict.id),
+            });
+            return;
+          }
+          try { setBinding("settings", normalizedHotkey); } catch { /* This page retains the new setting until reload. */ }
           isCapturingSettingsHotkey = false;
-          dialog.querySelector("#demoscope-settings-current-key").textContent = formatHotkey(hotkeyCode);
+          dialog.querySelector("#demoscope-settings-current-key").textContent = formatHotkey(normalizedHotkey);
+          refreshKeyLabels();
           dialog.querySelector("#demoscope-settings-key-status").textContent = settingText("settingsKeySaved");
           dialog.querySelector("#demoscope-settings-change-key").textContent = settingText("settingsChangeKey");
           playUiSound("confirm");
           return;
         }
-        if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.code !== readSettingsHotkey()) return;
+        const settingsCode = readSettingsHotkey();
+        if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || !settingsCode || normalizeKeyCode(event.code) !== settingsCode) return;
+        if (document.querySelector(".ds-dialog[open]")) return;
         if (dialog.open) {
           event.preventDefault();
           event.stopImmediatePropagation();
@@ -1315,7 +2923,7 @@
       card.querySelector('[data-rule="three"]').textContent = inviteText("inviteRuleThree");
       card.querySelector(".demoscope-invite-pref span").textContent = inviteText("inviteHidePref");
       copyButton.textContent = inviteText("inviteCopy");
-      if (doneLink) doneLink.textContent = inviteText("inviteDone");
+      if (doneLink) refreshInviteKeyLabels();
       const inviteNav = document.querySelector(".PageHeader .invitebutton");
       if (inviteNav) inviteNav.textContent = inviteText("inviteNav");
       updateVisibility();
@@ -1355,10 +2963,80 @@
       }
     }, true);
     renderText();
+    installInviteExtras(card, doneLink);
     installLanguageSelector(card);
     installDemoScopeFooter(false, getActiveLocale(), false);
     installSettingsUi();
     return true;
+  }
+
+  // "x" in the corner and Enter / Esc: both do what the "Done" link does.
+  function installInviteExtras(card, doneLink) {
+    if (card.querySelector(".demoscope-invite-close")) return;
+    if (!document.getElementById("demoscope-invite-extra-style")) {
+      const style = document.createElement("style");
+      style.id = "demoscope-invite-extra-style";
+      style.textContent = `
+        .demoscope-invite-card { position: relative; }
+        .demoscope-invite-card h1 { padding-right: 46px; }
+        .demoscope-invite-close { position: absolute; top: 14px; right: 14px; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid rgba(226,235,246,.15); border-radius: 10px; background: #141b25; color: #d7e0ec; cursor: pointer; transition: border-color 140ms ease, color 140ms ease; }
+        .demoscope-invite-close:hover { border-color: rgba(242,163,58,.6); color: #ffb654; }
+        .demoscope-invite-close:focus-visible { outline: 2px solid #ffb654; outline-offset: 3px; }
+        .demoscope-invite-close svg { width: 16px; height: 16px; }
+        .demoscope-invite-kbd { display: inline-block; margin-left: 0.5em; padding: 0.05em 0.35em; border: 1px solid rgba(226,235,246,.22); border-radius: 4px; background: rgba(0,0,0,.28); font: 600 0.72em/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; text-decoration: none; }
+      `;
+      document.head.append(style);
+    }
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "demoscope-invite-close";
+    close.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    close.addEventListener("click", () => {
+      playUiSound("click");
+      if (doneLink instanceof HTMLElement) doneLink.click();
+      else window.history.back();
+    });
+    card.prepend(close);
+
+    window.addEventListener("keydown", (event) => {
+      if (keyCaptureActive || isModalOpen() || event.repeat) return;
+      if (event.ctrlKey || event.altKey || event.metaKey) return;
+      const action = getActionForEvent(event, "invite");
+      if (action !== "inviteDone" && action !== "inviteClose") return;
+      const target = event.target instanceof Element ? event.target : null;
+      // Let focused buttons, links, fields and the language list keep their own keys.
+      if (target && (isShortcutBlocked(target) || target.closest("button, a, summary, [role='option'], [role='listbox']"))) return;
+      const languageList = document.getElementById("vacnet-language-options");
+      if (languageList && !languageList.hidden) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (action === "inviteClose") { close.click(); return; }
+      playUiSound("click");
+      if (doneLink instanceof HTMLElement) doneLink.click();
+      else window.history.back();
+    }, true);
+    refreshInviteKeyLabels();
+  }
+
+  function refreshInviteKeyLabels() {
+    const done = document.querySelector(".demoscope-invite-bottom .SecondaryButton");
+    if (done) {
+      done.textContent = inviteText("inviteDone");
+      const code = getBinding("inviteDone");
+      if (code) {
+        const kbd = document.createElement("kbd");
+        kbd.className = "demoscope-invite-kbd";
+        kbd.textContent = formatKeyLabel(code);
+        done.append(kbd);
+      }
+    }
+    const close = document.querySelector(".demoscope-invite-close");
+    if (close) {
+      const name = settingText("hkClose");
+      const code = getBinding("inviteClose");
+      close.setAttribute("aria-label", name);
+      close.title = code ? `${name} (${formatKeyLabel(code)})` : name;
+    }
   }
 
   function tr(key) {
@@ -1532,6 +3210,15 @@
           localStorage.removeItem(LANGUAGE_AUTO_STORAGE_KEY);
           localStorage.removeItem(EMPTY_QUEUE_LOCALE_KEY);
           localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
+          try { sessionStorage.removeItem("demoscopeLangSyncTried"); } catch { /* ignore */ }
+          const steamLanguage = Object.keys(SUPPORTED_LOCALES).find((key) => SUPPORTED_LOCALES[key] === locale);
+          if (steamLanguage) {
+            // Tell Valve too, otherwise its verdict text stays in the browser language.
+            const nextUrl = new URL(location.href);
+            nextUrl.searchParams.set("l", steamLanguage);
+            location.assign(nextUrl.href);
+            return;
+          }
         }
       } catch { /* Ignore unavailable storage. */ }
       location.reload();
@@ -1881,6 +3568,14 @@
     wallhack: "titleWalls",
     autobhop: "titleBhop",
     bot: "bot",
+    cheating: "titleCheating",
+  };
+  const VERDICT_SECTION_HELP = {
+    cheating: "helpCheating",
+    aimassist: "helpAim",
+    wallhack: "helpWalls",
+    autobhop: "helpBhop",
+    bot: "helpBot",
   };
   const DEFAULT_VERDICT = "skip";
   const HISTORY_SUMMARIES = new Set([...Object.keys(PRESETS), "mixed"]);
@@ -2273,6 +3968,11 @@
 
     .vacnet-enhanced .verdict-column .top-section-logo.hide-on-wrap { display: none !important; }
 
+    .vacnet-enhanced .verdict-column > .panel-header,
+    .vacnet-enhanced .verdict-column > .task-instructions { display: none !important; }
+
+    .vacnet-enhanced .PageHeader .ClipCount.demoscope-clipcount-visible { display: inline-block !important; }
+
     .vacnet-enhanced .verdicts-container {
       flex: 1 1 auto !important;
       min-height: 0 !important;
@@ -2626,8 +4326,12 @@
       display: none !important;
     }
 
+    .vacnet-enhanced .verdict-block { position: relative; }
+
     .vacnet-enhanced .verdict-block .vacnet-verdict-title {
-      display: block !important;
+      display: flex !important;
+      align-items: center;
+      gap: 7px;
       margin: 0 0 9px !important;
       font: 600 0.6875rem/1 var(--ss-font) !important;
       letter-spacing: 0.1em;
@@ -2635,6 +4339,152 @@
       color: var(--ss-text-secondary) !important;
       text-align: left !important;
     }
+
+    .vacnet-enhanced .vacnet-verdict-help-btn {
+      flex: 0 0 auto;
+      display: inline-grid;
+      place-items: center;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      border: 1px solid var(--ss-border);
+      border-radius: 50%;
+      background: transparent;
+      color: var(--ss-text-tertiary);
+      font: 700 0.625rem/1 var(--ss-font);
+      letter-spacing: 0;
+      text-transform: none;
+      cursor: pointer;
+      transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .vacnet-enhanced .vacnet-verdict-help-btn:hover,
+    .vacnet-enhanced .vacnet-verdict-help-btn[aria-expanded="true"] {
+      color: var(--ss-accent);
+      border-color: color-mix(in srgb, var(--ss-accent) 55%, var(--ss-border));
+      background: color-mix(in srgb, var(--ss-accent) 10%, transparent);
+    }
+
+    .vacnet-enhanced .vacnet-verdict-help {
+      position: absolute;
+      left: 0;
+      right: 0;
+      z-index: 30;
+      margin-top: -3px;
+      padding: 10px 12px;
+      box-sizing: border-box;
+      border: 1px solid color-mix(in srgb, var(--ss-accent) 38%, var(--ss-border));
+      border-radius: var(--ss-radius-md);
+      background: var(--ss-raised-alt);
+      box-shadow: var(--ss-shadow);
+      color: var(--ss-text);
+      font: 450 0.78rem/1.5 var(--ss-font);
+      letter-spacing: 0;
+      text-align: left;
+      text-transform: none;
+    }
+
+    .vacnet-enhanced .vacnet-verdict-help[hidden] { display: none !important; }
+
+
+    /* ---- single-verdict ("cheating") task ---- */
+    .vacnet-cheating-task .verdict-block .verdictbuttons { gap: 8px; }
+
+    .vacnet-cheating-task .verdict-block .verdictbutton,
+    .vacnet-cheating-task .verdict-block .verdictbutton label {
+      min-height: 68px !important;
+    }
+
+    .vacnet-cheating-task .verdict-block .verdictbutton label {
+      font-size: 0.86rem;
+      line-height: 1.25;
+    }
+
+    .vacnet-enhanced .verdictbutton:has(input:disabled:not(:checked)) {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .vacnet-enhanced .verdictbutton:has(input:disabled:not(:checked)) label { cursor: not-allowed; }
+
+    .vacnet-cheating-task .verdictbutton label[data-ds-key]::before {
+      content: attr(data-ds-key);
+      display: inline-block;
+      min-width: 1.1em;
+      margin-right: 0.4em;
+      padding: 0.05em 0.3em;
+      border-radius: 3px;
+      font: 600 0.6875rem/1.2 var(--ss-mono);
+      text-align: center;
+      color: var(--ss-text-secondary);
+      background: var(--ss-sunken);
+      border: 1px solid var(--ss-border-subtle);
+    }
+
+    .vacnet-enhanced .backbutton .vacnet-cancel-kbd {
+      display: inline-block;
+      min-width: 1.1em;
+      margin-left: 0.35em;
+      padding: 0.05em 0.3em;
+      border-radius: 3px;
+      font: 600 0.6875rem/1.2 var(--ss-mono);
+      color: var(--ss-text-secondary);
+      background: var(--ss-sunken);
+      border: 1px solid var(--ss-border-subtle);
+    }
+
+    .vacnet-enhanced .vacnet-verdict-key {
+      display: inline-block;
+      min-width: 1.1em;
+      margin-right: 0.4em;
+      padding: 0.05em 0.3em;
+      border-radius: 3px;
+      font: 600 0.6875rem/1.2 var(--ss-mono);
+      color: var(--ss-text-secondary);
+      background: var(--ss-sunken);
+      border: 1px solid var(--ss-border-subtle);
+    }
+
+    .vacnet-enhanced .verdict-block .verdict-lock-hint {
+      display: flex !important;
+      flex-direction: column;
+      gap: 8px;
+      margin: 12px 0 0 !important;
+      padding: 9px 11px !important;
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-md);
+      background: var(--ss-raised);
+      color: var(--ss-text-secondary) !important;
+      font: 500 0.72rem/1.4 var(--ss-font) !important;
+      text-align: left !important;
+    }
+
+    .vacnet-enhanced .verdict-block .verdict-lock-hint.vacnet-lock-done { display: none !important; }
+
+    .vacnet-enhanced .vacnet-lock-bar {
+      display: block;
+      height: 3px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: color-mix(in srgb, var(--ss-text) 10%, transparent);
+    }
+
+    .vacnet-enhanced .vacnet-lock-bar i {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--ss-accent);
+      transition: width 250ms linear;
+    }
+
+    @keyframes vacnet-lock-shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-4px); }
+      75% { transform: translateX(4px); }
+    }
+
+    .vacnet-enhanced .verdict-lock-hint.vacnet-lock-shake { animation: vacnet-lock-shake 260ms ease; }
+
 
     .vacnet-enhanced .verdict-column .verdictbuttons {
       display: grid !important;
@@ -2691,14 +4541,26 @@
       color: var(--ss-text) !important;
     }
 
-    .vacnet-enhanced .verdict-column .highlight-text,
-    .vacnet-enhanced .verdict-column .highlight-text-negative,
     .vacnet-enhanced .verdict-column .verdictbutton label b {
       color: inherit !important;
       font-weight: inherit !important;
     }
 
+    /* Key phrase of each question (orange) and the "not" of negative answers (blue). */
+    .vacnet-enhanced .verdict-column .highlight-text {
+      color: var(--ss-accent) !important;
+      font-weight: 650 !important;
+    }
+
+    .vacnet-enhanced .verdict-column .highlight-text-negative {
+      color: color-mix(in srgb, var(--ss-accent-secondary) 85%, var(--ss-text)) !important;
+      font-weight: 650 !important;
+    }
+
     .vacnet-enhanced .verdicts-container > .submitbuttons {
+      position: sticky !important;
+      bottom: 0 !important;
+      z-index: 6 !important;
       flex: 0 0 auto !important;
       display: block !important;
       box-sizing: border-box !important;
@@ -2762,6 +4624,7 @@
 
     #vacnet-clip-history .vacnet-review-badges {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: flex-end;
       gap: 6px;
@@ -2769,6 +4632,7 @@
 
     #vacnet-clip-history .vacnet-local-badge,
     #vacnet-clip-history .vacnet-ru-badge {
+      white-space: nowrap;
       padding: 0.3rem 0.52rem;
       border: 1px solid var(--ss-border-subtle);
       border-radius: 999px;
@@ -2778,7 +4642,11 @@
     }
 
     #vacnet-clip-history button.vacnet-local-badge {
-      font: inherit;
+      font: 600 0.625rem/1 var(--ss-font);
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
       cursor: pointer;
       transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
     }
@@ -3575,7 +5443,7 @@
   }
 
   function installCustomControls(player, bounds, refreshDisplay) {
-    const container = document.querySelector(".videocontainer");
+    const container = getVideoContainer();
     if (!container || container.querySelector("#vacnet-controls")) return;
 
     const controls = document.createElement("div");
@@ -3585,15 +5453,7 @@
         <input type="range" id="vacnet-seek" min="0" max="1000" value="0" step="1" aria-label="${tr("segmentPosition")}">
         <span id="vacnet-time">0:00.00 / ${formatSegmentTime(bounds.duration)}</span>
       </div>
-      <div class="vacnet-hints" aria-label="${tr("hotkeys")}">
-        <span><kbd>Enter ×2</kbd> ${tr("submitHint")}</span>
-        <span><kbd>1–5</kbd> ${tr("presetsHint")}</span>
-        <span><kbd>Shift</kbd> ${tr("accelerateHint")}</span>
-        <span><kbd>← →</kbd> ±5 ${tr("seconds")}</span>
-        <span><kbd>, .</kbd> ${tr("framesHint")}</span>
-        <span><kbd>Space</kbd> ${tr("pauseHint")}</span>
-        <span><kbd>M</kbd> ${tr("muteHint")}</span>
-        <span><kbd>F</kbd> ${tr("fullscreenHint")}</span>
+      <div class="vacnet-hints" aria-label="${tr("hotkeys")}">${buildHintsInnerMarkup()}
       </div>
     `;
     container.appendChild(controls);
@@ -3656,6 +5516,14 @@
     } finally {
       layoutMutationPaused = false;
     }
+  }
+
+  // Player hotkeys (Space, M, F, arrows...) must keep working while a verdict
+  // radio has focus - that is exactly where focus lands after clicking a
+  // verdict. Text fields, selects and other inputs still block them.
+  function isPlayerShortcutBlocked(target) {
+    if (target instanceof HTMLInputElement && target.type === "radio") return false;
+    return isShortcutBlocked(target);
   }
 
   function isShortcutBlocked(target) {
@@ -3904,66 +5772,77 @@
     window.addEventListener(
       "keydown",
       (event) => {
-        if (isShortcutBlocked(event.target)) return;
-        if (!document.querySelector(".videocontainer")) return;
+        if (keyCaptureActive || isModalOpen()) return;
+        if (isPlayerShortcutBlocked(event.target)) return;
+        if (!getVideoContainer()) return;
         if (hasChordModifier(event)) return;
-        if (
-          event.repeat &&
-          (event.code === "Space" ||
-            event.code === "KeyF" ||
-            event.code === "KeyM" ||
-            event.code.startsWith("Digit"))
-        ) {
+
+        const code = normalizeKeyCode(event.code);
+        const action = getActionForEvent(event);
+        const playerAction = Boolean(action) && !["settings", "proceed", "cancel"].includes(action);
+        const siteKey = code === "Space" || code === "KeyF" || code === "KeyM";
+        // The page / video.js also react to these keys, which made a toggle
+        // fire twice (= no visible change). Claim them, bound or free.
+        if (siteKey && (playerAction || !action)) event.stopImmediatePropagation();
+        if (!playerAction) return;
+
+        const isToggle = action === "playPause" || action === "mute" || action === "fullscreen";
+        if (event.repeat && (isToggle || action.startsWith("quick"))) {
+          if (isToggle) event.preventDefault();
           return;
         }
 
-        switch (event.code) {
-          case "ArrowLeft":
+        switch (action) {
+          case "seekBack":
             event.preventDefault();
             seekBy(-ARROW_JUMP_SEC);
             break;
-          case "ArrowRight":
+          case "seekForward":
             event.preventDefault();
             seekBy(ARROW_JUMP_SEC);
             break;
-          case "Comma":
+          case "frameBack":
             event.preventDefault();
             stepFrame(-1);
             break;
-          case "Period":
+          case "frameForward":
             event.preventDefault();
             stepFrame(1);
             break;
-          case "Space":
+          case "playPause":
             event.preventDefault();
             togglePlay();
             break;
-          case "KeyF":
+          case "fullscreen":
             event.preventDefault();
             toggleFullscreen();
             break;
-          case "KeyM":
+          case "mute":
             event.preventDefault();
             toggleMute();
             break;
-          case "Digit1":
-          case "Digit2":
-          case "Digit3":
-          case "Digit4":
-          case "Digit5": {
-            const preset = PRESET_KEYS[event.code];
+          case "speedBoost":
+            setShiftSpeedActive(true);
+            break;
+          default: {
+            const quick = action.match(/^quick([1-5])$/);
+            if (!quick) break;
+            const slot = `Digit${quick[1]}`;
+            if (isCheatingMode()) {
+              const kind = CHEATING_KEYS[slot];
+              if (kind) {
+                event.preventDefault();
+                selectCheatingVerdict(kind);
+              }
+              break;
+            }
+            const preset = PRESET_KEYS[slot];
             if (preset) {
               event.preventDefault();
               applyPreset(preset, { announce: true });
             }
             break;
           }
-          case "ShiftLeft":
-          case "ShiftRight":
-            setShiftSpeedActive(true);
-            break;
-          default:
-            break;
         }
       },
       true,
@@ -3972,9 +5851,20 @@
     window.addEventListener(
       "keyup",
       (event) => {
-        if (event.code === "ShiftLeft" || event.code === "ShiftRight") {
-          setShiftSpeedActive(false);
+        if (keyCaptureActive || isModalOpen()) return;
+        const code = normalizeKeyCode(event.code);
+        if (
+          code === "Space" &&
+          !hasChordModifier(event) &&
+          !isPlayerShortcutBlocked(event.target) &&
+          getVideoContainer()
+        ) {
+          // Stop a focused button/radio from also "clicking" on Space release.
+          event.preventDefault();
+          event.stopImmediatePropagation();
         }
+        const boostKey = getBinding("speedBoost");
+        if (boostKey && code === boostKey) setShiftSpeedActive(false);
       },
       true,
     );
@@ -4095,7 +5985,7 @@
     root.querySelectorAll("label").forEach((label) => {
       if (!label.closest(".verdict-column")) return;
       label
-        .querySelectorAll(".highlight-text, .highlight-text-negative, b")
+        .querySelectorAll("b")
         .forEach((el) => {
           el.replaceWith(document.createTextNode(el.textContent || ""));
         });
@@ -4115,9 +6005,92 @@
       if (!titleEl) {
         titleEl = document.createElement("div");
         titleEl.className = "vacnet-verdict-title";
+        titleEl.innerHTML = '<span class="vacnet-verdict-title-text"></span>';
         block.insertBefore(titleEl, buttons);
       }
-      if (titleEl.textContent !== title) titleEl.textContent = title;
+      let textEl = titleEl.querySelector(".vacnet-verdict-title-text");
+      if (!textEl) {
+        titleEl.textContent = "";
+        textEl = document.createElement("span");
+        textEl.className = "vacnet-verdict-title-text";
+        titleEl.append(textEl);
+      }
+      if (textEl.textContent !== title) textEl.textContent = title;
+      ensureVerdictHelp(block, titleEl, title, match[1]);
+    });
+    localizeCheatingVerdicts();
+  }
+
+  // "?" next to each section title: shows what the category means.
+  function ensureVerdictHelp(block, titleEl, title, field) {
+    // DemoScope's own localized text first (Valve's page falls back to English
+    // for some languages); the site's wording only if we have no row for it.
+    const helpKey = VERDICT_SECTION_HELP[field];
+    const own = helpKey ? tr(helpKey) : "";
+    const description = (own && own !== helpKey ? own : "")
+      || block.querySelector(".verdict-desc")?.textContent?.trim();
+    if (!description) return;
+
+    let button = titleEl.querySelector(".vacnet-verdict-help-btn");
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "vacnet-verdict-help-btn";
+      button.textContent = "?";
+      button.tabIndex = -1; // keep Enter/Space for the review hotkeys
+      button.setAttribute("aria-expanded", "false");
+      titleEl.append(button);
+    }
+    button.setAttribute("aria-label", title);
+
+    let panel = block.querySelector(".vacnet-verdict-help");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.className = "vacnet-verdict-help";
+      panel.setAttribute("role", "note");
+      panel.hidden = true;
+      titleEl.after(panel);
+    }
+    if (panel.textContent !== description) panel.textContent = description;
+    installVerdictHelpHandlers();
+  }
+
+  let verdictHelpHandlersInstalled = false;
+
+  function closeVerdictHelp(except = null) {
+    document.querySelectorAll(".vacnet-verdict-help:not([hidden])").forEach((panel) => {
+      if (panel === except) return;
+      panel.hidden = true;
+      panel.closest(".verdict-block")
+        ?.querySelector(".vacnet-verdict-help-btn")
+        ?.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function installVerdictHelpHandlers() {
+    if (verdictHelpHandlersInstalled) return;
+    verdictHelpHandlersInstalled = true;
+
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest(".vacnet-verdict-help-btn");
+      if (button) {
+        event.preventDefault();
+        const panel = button.closest(".verdict-block")?.querySelector(".vacnet-verdict-help");
+        if (!panel) return;
+        const open = panel.hidden;
+        closeVerdictHelp(open ? panel : null);
+        panel.hidden = !open;
+        button.setAttribute("aria-expanded", String(open));
+        playUiSound("click");
+        button.blur(); // hand focus back so Space/M/arrows keep working
+        return;
+      }
+      if (!target?.closest(".vacnet-verdict-help")) closeVerdictHelp();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.code === "Escape") closeVerdictHelp();
     });
   }
 
@@ -4209,16 +6182,18 @@
   }
 
   function isReviewPageReady(prevVod, startedAt) {
+    // Any verdict form counts: the classic four questions *and* the newer
+    // single "cheating" question (there is no aimassist input in that one).
     const hasReviewUi = Boolean(
-      document.querySelector(".videocontainer") &&
-        document.querySelector('input[name="aimassist"]'),
+      getVideoContainer() &&
+        document.querySelector('.verdictbuttons input[type="radio"]'),
     );
     if (!hasReviewUi) return false;
 
     const video = getVideoElement();
     const mediaReady =
       video instanceof HTMLVideoElement &&
-      video.readyState >= 2 &&
+      video.readyState >= 1 &&
       Boolean(video.currentSrc || video.src);
     if (!mediaReady) return false;
 
@@ -4244,8 +6219,14 @@
     }
 
     const deadline = Date.now() + 30000;
+    const pageStartedAt = Date.now();
     while (Date.now() < deadline) {
       if (isReviewPageReady(prevVod, startedAt)) {
+        hideSubmitLoadingOverlay();
+        return;
+      }
+      // Not a clip page at all (empty queue, welcome page...): nothing to wait for.
+      if (document.readyState === "complete" && !getVideoContainer() && Date.now() - pageStartedAt > 3000) {
         hideSubmitLoadingOverlay();
         return;
       }
@@ -4253,6 +6234,7 @@
     }
 
     hideSubmitLoadingOverlay();
+    recordEvent("next clip did not load", "30 s timeout after submitting");
     playUiSound("error");
     showToast(settingText("settingsTimeout"), "error", 6200);
   }
@@ -4518,7 +6500,7 @@
   }
 
   function ensureClipHistoryPanel() {
-    const container = document.querySelector(".verdicts-container");
+    const container = getVerdictContainer();
     if (!container || document.getElementById("vacnet-clip-history")) return;
 
     const panel = document.createElement("div");
@@ -4579,7 +6561,7 @@
   }
 
   function positionClipHistoryPanel() {
-    const container = document.querySelector(".verdicts-container");
+    const container = getVerdictContainer();
     const panel = document.getElementById("vacnet-clip-history");
     if (!container || !panel) return;
     if (container.firstElementChild !== panel) {
@@ -4673,9 +6655,11 @@
   }
 
   function refreshProceedButtonLabel() {
+    refreshCancelButtonLabel();
     const button = document.getElementById("submitVerdictButton");
     if (!(button instanceof HTMLButtonElement)) return;
 
+    const proceedKey = formatKeyLabel(getBinding("proceed"));
     const labelingMode = isLabelingMode();
     let label = tr("confirm");
     if (labelingMode) {
@@ -4687,12 +6671,12 @@
     const armed = proceedArmed && labelingMode;
     const stateKey = `${label}:${armed}`;
     button.classList.toggle("vacnet-proceed-armed", armed);
-    button.setAttribute("aria-label", `${label}. ${tr("enterHint")}`);
+    button.setAttribute("aria-label", proceedKey ? `${label}. ${tr("enterHint").replace(/Enter/i, proceedKey)}` : label);
 
     const currentKbd = button.querySelector(".vacnet-proceed-kbd");
     if (
       button.dataset.vacnetLabelState === stateKey &&
-      currentKbd?.textContent === "Enter" &&
+      (currentKbd?.textContent || "") === proceedKey &&
       button.firstChild?.textContent === `${label} `
     ) {
       return;
@@ -4701,8 +6685,8 @@
     button.dataset.vacnetLabelState = stateKey;
     const kbd = document.createElement("kbd");
     kbd.className = "vacnet-proceed-kbd";
-    kbd.textContent = "Enter";
-    button.replaceChildren(document.createTextNode(`${label} `), kbd);
+    kbd.textContent = proceedKey;
+    button.replaceChildren(document.createTextNode(`${label} `), ...(proceedKey ? [kbd] : []));
   }
 
   function verdictLabelForField(field, selected) {
@@ -4858,14 +6842,16 @@
     window.addEventListener(
       "keydown",
       (event) => {
-        if (event.code !== "Enter" && event.code !== "NumpadEnter") return;
+        if (keyCaptureActive || isModalOpen()) return;
         if (event.repeat) return;
         if (event.metaKey || event.ctrlKey || event.altKey) return;
-        if (isShortcutBlocked(event.target)) return;
+        const action = getActionForEvent(event);
+        if (action !== "proceed" && action !== "cancel") return;
+        if (isPlayerShortcutBlocked(event.target)) return;
         if (event.target instanceof HTMLSelectElement) return;
-        if (!document.querySelector(".videocontainer")) return;
+        if (!getVideoContainer()) return;
 
-        if (invokeProceedAction()) {
+        if (action === "proceed" ? invokeProceedAction() : invokeCancelAction()) {
           event.preventDefault();
           event.stopImmediatePropagation();
         }
@@ -5050,7 +7036,7 @@
   }
 
   function positionShiftSpeedBar() {
-    const container = document.querySelector(".verdicts-container");
+    const container = getVerdictContainer();
     const speedBar = document.getElementById("vacnet-shift-speed");
     const inner = document.querySelector(".verdicts-container-inner");
     if (!container || !speedBar || !inner) return;
@@ -5060,9 +7046,9 @@
   }
 
   function positionEnhancementBar() {
-    const container = document.querySelector(".verdicts-container");
+    const container = getVerdictContainer();
     const bar = document.getElementById("vacnet-enhance-bar");
-    const submit = document.getElementById("submitbuttons");
+    const submit = getSubmitArea();
     if (!container || !bar || !submit) return;
     if (bar.nextElementSibling !== submit) {
       container.insertBefore(bar, submit);
@@ -5070,8 +7056,8 @@
   }
 
   function fixProceedFooter() {
-    const container = document.querySelector(".verdicts-container");
-    const submit = document.getElementById("submitbuttons");
+    const container = getVerdictContainer();
+    const submit = getSubmitArea();
     if (!container || !submit) return;
 
     pauseLayoutMutations(() => {
@@ -5156,7 +7142,7 @@
 
   function installEmptyQueueNotice() {
     const notice = document.querySelector(".infomessage");
-    if (!(notice instanceof HTMLElement) || document.querySelector(".videocontainer")) return false;
+    if (!(notice instanceof HTMLElement) || getVideoContainer()) return false;
     const message = notice.textContent.replace(/\s+/g, " ").trim().toLowerCase();
     const submitted = new URLSearchParams(location.search).get("submit_success") === "1";
     if (!submitted && !message.includes("no tasks available")) return false;
@@ -5212,42 +7198,188 @@
     installSettingsUi();
     return true;
   }
+  // Valve's redesigned review page (panel-header / task-instructions /
+  // .review-layout) no longer wraps the verdict blocks in
+  // .verdicts-container-inner and keeps #submitbuttons *outside*
+  // .verdicts-container. Normalise that back to the structure the rest of
+  // DemoScope expects, so both the old and the new markup work.
+  function ensureReviewStructure() {
+    const container = getVerdictContainer();
+    if (!container) return;
+
+    if (!container.querySelector(":scope > .verdicts-container-inner")) {
+      const blocks = Array.from(container.querySelectorAll(":scope > .verdict-block"));
+      if (blocks.length) {
+        const inner = document.createElement("div");
+        inner.className = "verdicts-container-inner";
+        container.insertBefore(inner, blocks[0]);
+        for (const block of blocks) inner.appendChild(block);
+      }
+    }
+
+    const submit = getSubmitArea();
+    if (submit && submit.parentElement !== container) {
+      container.appendChild(submit);
+    }
+
+    // The new layout hides the legacy header counter and shows it in the
+    // verdict panel instead. Mirror the localized text into the header chip.
+    const panelCount = document.querySelector(".verdict-column .panel-clipcount");
+    const headerCount = document.querySelector(".PageHeader .ClipCount");
+    if (panelCount && headerCount && headerCount.dataset.demoscopeSynced !== "1") {
+      headerCount.innerHTML = panelCount.innerHTML;
+      headerCount.dataset.demoscopeSynced = "1";
+      headerCount.classList.add("demoscope-clipcount-visible");
+    }
+  }
+
+  // ---- New "cheating" task: one verdict (Cheating / Uncertain / No cheats) ----
+  // Valve now sometimes serves a single question instead of the four-category
+  // form. Quick verdicts and combinations make no sense there, so DemoScope
+  // switches to a compact layout with its own labels, 1-3 hotkeys and a lock
+  // indicator for the verdicts that only unlock when the clip ends.
+  const CHEATING_KEYS = {
+    Digit1: "positive", Digit2: "skip", Digit3: "negative",
+    Numpad1: "positive", Numpad2: "skip", Numpad3: "negative",
+  };
+
+  function isCheatingMode() {
+    return Boolean(document.getElementById("verdictbuttons_cheating"));
+  }
+
+  function selectCheatingVerdict(kind) {
+    const radio = document.getElementById(`cheating_${kind}`);
+    if (!(radio instanceof HTMLInputElement) || radio.checked) return;
+    if (radio.disabled) {
+      playUiSound("error");
+      const hint = document.querySelector(".verdict-lock-hint");
+      if (hint) {
+        hint.classList.remove("vacnet-lock-shake");
+        void hint.offsetWidth;
+        hint.classList.add("vacnet-lock-shake");
+      }
+      return;
+    }
+    radio.click();
+  }
+
+  function localizeCheatingVerdicts() {
+    if (!isCheatingMode()) return;
+    const locale = getActiveLocale();
+    const defs = [
+      ["positive", "cheatYes", "quick1", "highlight-text"],
+      ["skip", "cheatUnsure", "quick2", ""],
+      ["negative", "cheatNo", "quick3", "highlight-text-negative"],
+    ];
+    for (const [kind, key, quick, cls] of defs) {
+      const label = document.querySelector(`label[for="cheating_${kind}"]`);
+      if (!label) continue;
+      const number = formatKeyLabel(getBinding(quick)) || "–";
+      const stamp = `${locale}|${key}|${number}`;
+      if (label.dataset.demoscopeLabel === stamp) continue;
+      label.dataset.demoscopeLabel = stamp;
+      // The key badge is drawn by CSS (data-ds-key): Valve copies the label text
+      // into its confirmation line, so the digit must not be part of the DOM text.
+      const caption = key === "cheatUnsure" ? settingText(key) : tr(key);
+      let text;
+      if (cls) {
+        text = document.createElement("span");
+        text.className = cls;
+        text.textContent = caption;
+      } else {
+        text = document.createTextNode(caption);
+      }
+      label.dataset.dsKey = number;
+      label.replaceChildren(text);
+    }
+
+    const hint = document.querySelector(".verdict-lock-hint");
+    if (hint && !hint.querySelector(".vacnet-lock-text")) {
+      const text = document.createElement("span");
+      text.className = "vacnet-lock-text";
+      const bar = document.createElement("span");
+      bar.className = "vacnet-lock-bar";
+      bar.appendChild(document.createElement("i"));
+      hint.replaceChildren(text, bar);
+    }
+    updateCheatingLock();
+  }
+
+  function updateCheatingLock() {
+    const hint = document.querySelector(".verdict-lock-hint");
+    if (!hint) return;
+    const skip = document.getElementById("cheating_skip");
+    const negative = document.getElementById("cheating_negative");
+    const locked = Boolean(skip?.disabled || negative?.disabled);
+    const chosen = Boolean(document.querySelector('input[name="cheating"]:checked'));
+    hint.classList.toggle("vacnet-lock-done", !locked || chosen);
+    if (!locked || chosen) return;
+
+    const video = getVideoElement();
+    const duration = video && Number.isFinite(video.duration) ? video.duration : 0;
+    const current = video ? video.currentTime || 0 : 0;
+    const full = tr("cheatLocked");
+    const next = duration > 0
+      ? full.replace("{t}", formatClockTime(Math.max(0, duration - current)))
+      : full.split(" · ")[0];
+    const textEl = hint.querySelector(".vacnet-lock-text");
+    if (textEl && textEl.textContent !== next) textEl.textContent = next;
+    const fill = hint.querySelector(".vacnet-lock-bar i");
+    if (fill && duration > 0) {
+      fill.style.width = `${Math.min(100, (current / duration) * 100).toFixed(1)}%`;
+    }
+  }
+
+  let cheatingLockTimer = 0;
+  function startCheatingLockWatcher() {
+    if (cheatingLockTimer || !isCheatingMode()) return;
+    cheatingLockTimer = window.setInterval(updateCheatingLock, 250);
+  }
+
   function enhanceLayout() {
     document.body.classList.add("vacnet-enhanced");
-    hideSiteFooter();
-    installDemoScopeFooter(Boolean(document.querySelector(".videocontainer")));
-    normalizeVerdictLabels();
-    applyVerdictSectionTitles();
+    safeStep("taskMode", () => document.body.classList.toggle("vacnet-cheating-task", isCheatingMode()));
+    safeStep("reviewStructure", ensureReviewStructure);
+    safeStep("siteFooter", hideSiteFooter);
+    safeStep("customFooter", () => installDemoScopeFooter(Boolean(getVideoContainer())));
+    safeStep("verdictLabels", () => { normalizeVerdictLabels(); applyVerdictSectionTitles(); });
 
-    const verdictContainer = document.querySelector(".verdicts-container");
-    ensureClipHistoryPanel();
-    positionClipHistoryPanel();
+    const verdictContainer = getVerdictContainer();
+    safeStep("clipHistoryPanel", () => { ensureClipHistoryPanel(); positionClipHistoryPanel(); });
 
-    if (verdictContainer && !document.getElementById("vacnet-shift-speed")) {
-      const inner = document.querySelector(".verdicts-container-inner");
-      const anchor =
-        inner || verdictContainer.querySelector("#vacnet-enhance-bar");
-      verdictContainer.insertBefore(buildShiftSpeedBar(), anchor || null);
-    }
+    safeStep("shiftSpeedBar", () => {
+      if (verdictContainer && !document.getElementById("vacnet-shift-speed")) {
+        const inner = document.querySelector(".verdicts-container-inner");
+        const anchor = inner || verdictContainer.querySelector("#vacnet-enhance-bar");
+        verdictContainer.insertBefore(buildShiftSpeedBar(), anchor || null);
+      }
+    });
 
-    if (verdictContainer && !document.getElementById("vacnet-enhance-bar")) {
-      const submit = document.getElementById("submitbuttons");
-      verdictContainer.insertBefore(buildEnhancementBar(), submit || null);
-    }
+    safeStep("quickVerdicts", () => {
+      if (verdictContainer && !isCheatingMode() && !document.getElementById("vacnet-enhance-bar")) {
+        const submit = getSubmitArea();
+        verdictContainer.insertBefore(buildEnhancementBar(), submit && submit.parentElement === verdictContainer ? submit : null);
+      }
+    });
 
-    positionClipHistoryPanel();
-    positionShiftSpeedBar();
-    positionEnhancementBar();
-    applyDefaultVerdicts();
-    syncPresetButtons();
-    installVerdictChangeReset();
-    fixProceedFooter();
-    renderClipHistory(parseSegmentBounds());
-    installSettingsUi();
+    safeStep("layoutOrder", () => {
+      positionClipHistoryPanel();
+      positionShiftSpeedBar();
+      positionEnhancementBar();
+    });
+    safeStep("defaultVerdicts", () => {
+      applyDefaultVerdicts();
+      syncPresetButtons();
+      installVerdictChangeReset();
+    });
+    safeStep("proceedFooter", fixProceedFooter);
+    safeStep("clipHistory", () => renderClipHistory(parseSegmentBounds()));
+    safeStep("settingsUi", installSettingsUi);
+    safeStep("cheatingLock", startCheatingLockWatcher);
   }
 
   function watchProceedFooter() {
-    const container = document.querySelector(".verdicts-container");
+    const container = getVerdictContainer();
     if (!container) return;
     fixProceedFooter();
     const observer = new MutationObserver((mutations) => {
@@ -5274,36 +7406,65 @@
   async function init() {
     if (migrateEmptyQueueLanguage()) return;
     if (syncAutomaticLanguage()) return;
+    if (syncSelectedLanguage()) return;
+    safeStep("animations", applyAnimationSettings);
+    safeStep("polishStyles", ensureUiPolishStyles);
+    safeStep("errorCapture", installErrorCapture);
+    captureOriginalSkeleton();
     if (/^\/vacnet\/?$/.test(location.pathname)) {
-      installAccountNameControl();
-      installWelcomePage();
+      safeStep("accountName", installAccountNameControl);
+      safeStep("settingsUi", installSettingsUi);
+      safeStep("welcomePage", installWelcomePage);
       return;
     }
     if (/\/vacnet\/createinvite\/?$/.test(location.pathname)) {
-      installAccountNameControl();
-      installInvitePage();
+      safeStep("accountName", installAccountNameControl);
+      safeStep("invitePage", installInvitePage);
       return;
     }
     if (!IS_REVIEW_PAGE) return;
-    installAccountNameControl();
-    bootSubmitLoadingIfPending();
+    safeStep("accountName", installAccountNameControl);
+    safeStep("bootLoading", bootSubmitLoadingIfPending);
 
-    if (!document.querySelector(".videocontainer")) {
+    let hasVideo = Boolean(getVideoContainer());
+    let hasForm = hasVerdictForm();
+    if (hasVideo !== hasForm) {
+      // Exactly one of the two is there: give a late-rendered page a moment.
+      const waitUntil = Date.now() + 2000;
+      while (Date.now() < waitUntil && hasVideo !== hasForm) {
+        await new Promise((resolve) => window.setTimeout(resolve, 100));
+        hasVideo = Boolean(getVideoContainer());
+        hasForm = hasVerdictForm();
+      }
+    }
+    if (!hasVideo && !hasForm) {
       if (isSubmitPending()) hideSubmitLoadingOverlay();
       installEmptyQueueNotice();
+      return;
+    }
+    if (!hasVideo || !hasForm) {
+      // Part of a clip page is there but not all: Valve changed the layout.
+      disableDemoScope(hasVideo ? "verdictForm" : "videoContainer");
       return;
     }
 
     try { localStorage.removeItem(EMPTY_QUEUE_FIRST_SEEN_KEY); } catch { /* Ignore unavailable storage. */ }
     enhanceLayout();
-    watchVerdictLabels();
-    watchProceedFooter();
-    installProceedShortcut();
+    if (diag.failures.length >= 5) {
+      // So many steps failed that the page is unrecognizable: back out cleanly.
+      disableDemoScope("tooManyFailures");
+      return;
+    }
+    safeStep("watchLabels", watchVerdictLabels);
+    safeStep("watchFooter", watchProceedFooter);
+    safeStep("proceedShortcut", installProceedShortcut);
+    safeStep("keyLabels", refreshKeyLabels);
+    if (isSubmitPending()) void finishSubmitLoadingWhenReady();
 
     const footerObserver = new MutationObserver(() => hideSiteFooter());
     footerObserver.observe(document.body, { childList: true, subtree: true });
 
-    const bounds = parseSegmentBounds();
+    const bounds = safeStep("segmentBounds", parseSegmentBounds, null);
     if (!bounds) {
       if (isSubmitPending()) void finishSubmitLoadingWhenReady();
       return;
