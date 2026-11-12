@@ -15,8 +15,8 @@ Verdict presets · a clip-aware player · remappable hotkeys · private local hi
 
 <br>
 
-[![Version](https://img.shields.io/badge/version-1.4.0-3b82f6?style=flat-square)](https://github.com/ebayybe/DemoScope/releases)
-[![License](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)](https://github.com/ebayybe/DemoScope/blob/main/LICENSE)
+[![Version](https://img.shields.io/badge/version-v1.2.0-3b82f6?style=flat-square)](https://github.com/ebayybe/DemoScope/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-22c55e?style=flat-square)](https://github.com/ebayybe/DemoScope/blob/main/LICENSE)
 [![Userscript](https://img.shields.io/badge/Tampermonkey%20%7C%20Violentmonkey-userscript-f59e0b?style=flat-square)](#installation)
 [![Languages](https://img.shields.io/badge/languages-29-8b5cf6?style=flat-square)](#languages)
 [![Privacy](https://img.shields.io/badge/telemetry-none-64748b?style=flat-square)](#privacy)
@@ -35,9 +35,10 @@ Verdict presets · a clip-aware player · remappable hotkeys · private local hi
 
 <table>
   <tr>
-    <td align="center" width="33%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Welcome.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Welcome.png" alt="DemoScope welcome screen"></a><br><sub><b>Welcome screen</b></sub></td>
-    <td align="center" width="33%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope.png" alt="DemoScope main interface"></a><br><sub><b>Main interface</b></sub></td>
-    <td align="center" width="33%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Invite_a_friend.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Invite_a_friend.png" alt="DemoScope invite page"></a><br><sub><b>Invite a friend</b></sub></td>
+    <td align="center" width="25%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Welcome.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Welcome.png" alt="DemoScope welcome screen"></a><br><sub><b>Welcome screen</b></sub></td>
+    <td align="center" width="25%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope.png" alt="DemoScope main interface"></a><br><sub><b>Main interface</b></sub></td>
+    <td align="center" width="25%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/2_DemoScope.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/2_DemoScope.png" alt="DemoScope clip review interface"></a><br><sub><b>Clip review interface</b></sub></td>
+    <td align="center" width="25%"><a href="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Invite_a_friend.png"><img src="https://raw.githubusercontent.com/ebayybe/DemoScope/main/Photo/DemoScope_Invite_a_friend.png" alt="DemoScope invite page"></a><br><sub><b>Invite a friend</b></sub></td>
   </tr>
 </table>
 
@@ -179,4 +180,10 @@ DemoScope is an unofficial community project, not affiliated with or endorsed by
 
 ## License
 
-Released under the [MIT](https://github.com/ebayybe/DemoScope/blob/main/LICENSE) license.
+Released under the [GNU GPL v3.0](https://github.com/ebayybe/DemoScope/blob/main/LICENSE) license.
+
+## Acknowledgments
+
+- **Initial idea and base interface:** [*CS2 VACNet Review — Player & Layout Enhancements*](https://greasyfork.org/ru/scripts/591778-cs2-vacnet-review-player-layout-enhancements) by skinsales / goodvibes (MIT).
+- **Related concept and Russian-language fork:** [*VACLens RU — CS2 Review Assistant*](https://greasyfork.org/ru/scripts/592414-vaclens-ru-cs2-review-assistant) by authorless (MIT).
+- **Architecture rewrite, reusable framework, 29-language support, and custom verdict presets:** ebayybe.
